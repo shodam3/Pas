@@ -170,13 +170,12 @@
       <div class="muted">Záznamy z pásu a tréninky se ukládají do vašeho soukromého repozitáře. Klíč zůstává jen v tomto telefonu.</div>
       <div class="row"><input id="ghRepo" class="grow" placeholder="repozitář, např. pas-data"></div>
       <div class="row"><input id="ghToken" class="grow" type="password" placeholder="přístupový klíč (github_pat_…)" autocomplete="off"></div>
-      <div class="row"><button id="ghSave">Uložit a ověřit</button><button class="ghost" id="ghSync">Odeslat neodeslané</button><button class="ghost" id="ghRestore">Načíst tréninky z GitHubu</button><button class="ghost" id="ghRuns">Záznamy na GitHubu</button></div>
+      <div class="row"><button id="ghSave">Uložit a ověřit</button><button class="ghost" id="ghSync">Odeslat neodeslané</button><button class="ghost" id="ghRestore">Načíst tréninky z GitHubu</button></div>
       <div id="ghStatus" class="muted"></div>
-      <div id="ghList"></div>
     </div>
     <div class="card">
-      <h2>Uložené záznamy z pásu</h2>
-      <div class="muted">Záznamy jsou uložené jen v tomto prohlížeči.</div>
+      <h2>Záznamy z pásu v telefonu</h2>
+      <div class="muted">Po uložení na GitHub se záznam z telefonu automaticky smaže. Zde jsou jen záznamy, které na odeslání čekají.</div>
       <div id="runsList"></div>
     </div>
   </section>
@@ -850,15 +849,15 @@ function saveRun(r) {
 
 function renderRuns() {
   const idx = runsIndex();
-  if (!idx.length) { $('runsList').innerHTML = '<div class="muted" style="margin-top:8px">Zatím žádné záznamy.</div>'; return; }
+  if (!idx.length) { $('runsList').innerHTML = '<div class="muted" style="margin-top:8px">Žádné záznamy nečekají na odeslání.</div>'; return; }
   $('runsList').innerHTML = idx.map(m =>
     '<div class="run-item" data-id="' + m.id + '"><div class="grow"><b>' + new Date(m.startedAt).toLocaleString('cs-CZ', { day:'numeric', month:'numeric', hour:'2-digit', minute:'2-digit' }) + '</b> · ' + escapeHtml(m.workout) +
-    '<div class="muted">' + fmtTime(m.active) + ' · ' + fmtKm(m.dist) + ' km' + (m.completed ? '' : ' · nedokončeno') + (gh.ready() ? (m.uploaded ? ' · ☁ na GitHubu' : ' · neodesláno') : '') + '</div></div>' +
+    '<div class="muted">' + fmtTime(m.active) + ' · ' + fmtKm(m.dist) + ' km' + (m.completed ? '' : ' · nedokončeno') + (gh.ready() ? ' · čeká na odeslání' : '') + '</div></div>' +
     '<button class="ghost" data-a="csv">CSV</button><button class="ghost" data-a="del">Smazat</button></div>').join('');
   document.querySelectorAll('#runsList .run-item').forEach(el => {
     const id = el.dataset.id;
     el.querySelector('[data-a=csv]').onclick = () => downloadCsv(id);
-    armDouble(el.querySelector('[data-a=del]'), runsIndex().find(m => m.id === id)?.uploaded || !gh.ready() ? 'Opravdu?' : 'Není na GitHubu! Smazat?', () => {
+    armDouble(el.querySelector('[data-a=del]'), !gh.ready() ? 'Opravdu?' : 'Není na GitHubu! Smazat?', () => {
       store.del('pas.run.' + id); store.set('pas.runs', runsIndex().filter(m => m.id !== id)); renderRuns();
     });
   });
@@ -908,15 +907,6 @@ const gh = {
       return { name:f.name, id:m ? m[6] : f.name, date:m ? new Date(+m[1], m[2] - 1, +m[3], +m[4], +m[5]) : null, size:f.size };
     }).sort((a, b) => (b.date || 0) - (a.date || 0));
   },
-  async restoreOne(name) {
-    const d = JSON.parse(await this.raw('zaznamy/' + name));
-    if (!d.meta || !Array.isArray(d.samples)) throw new Error('Soubor nemá očekávaný formát');
-    const meta = { ...d.meta, uploaded:true };
-    if (!store.set('pas.run.' + meta.id, { meta, samples:d.samples })) throw new Error('Paměť prohlížeče je plná – smažte z telefonu starší záznamy.');
-    const idx = runsIndex().filter(m => m.id !== meta.id); idx.push(meta); idx.sort((a, b) => b.startedAt - a.startedAt);
-    if (!store.set('pas.runs', idx)) { store.del('pas.run.' + meta.id); throw new Error('Paměť prohlížeče je plná.'); }
-    return meta;
-  },
   async get(p) { const r = await this.api(this.path(p)); return r && r.content != null ? b64dec(r.content) : null; },
   status(t, cls) { $('ghStatus').innerHTML = '<span class="' + (cls || '') + '">' + escapeHtml(t) + '</span>'; },
   async verify() {
@@ -936,16 +926,19 @@ const gh = {
     if (!this.ready() || this.busy) return;
     this.busy = true; let ok = 0, fail = 0;
     try {
-      for (const m of runsIndex().filter(m => !m.uploaded)) {
-        const r = store.get('pas.run.' + m.id, null); if (!r) continue;
+      const dropLocal = id => { store.del('pas.run.' + id); store.set('pas.runs', runsIndex().filter(x => x.id !== id)); };
+      runsIndex().filter(m => m.uploaded).forEach(m => dropLocal(m.id));   // dříve odeslané
+      for (const m of runsIndex()) {
+        const r = store.get('pas.run.' + m.id, null); if (!r) { dropLocal(m.id); continue; }
         try {
           await this.put(this.runPath(m), JSON.stringify({ format:'pas-zaznam-1', meta:m,
             sloupce:['cas_ms', 'rychlost_kmh', 'vzdalenost_m', 'sklon_pct', 'tep', 'pauza', 'usek'], samples:r.samples }), 'Záznam ' + new Date(m.startedAt).toLocaleString('cs-CZ') + ' · ' + m.workout);
-          store.set('pas.runs', runsIndex().map(x => x.id === m.id ? { ...x, uploaded:true } : x)); ok++;
+          dropLocal(m.id); ok++;   // na GitHubu je uložen – z telefonu smazat
         } catch (e) { fail++; log('GitHub – záznam ' + m.id + ': ' + e.message); }
       }
     } finally { this.busy = false; }
-    if (ok || fail) { this.status(fail ? 'Odesláno ' + ok + ', nepodařilo se ' + fail + ' (zkusím to znovu později).' : 'Odesláno záznamů: ' + ok, fail ? 'bad' : 'ok'); if (!$('tab-runs').hidden) renderRuns(); }
+    if (ok || fail) { this.status(fail ? 'Odesláno ' + ok + ', nepodařilo se ' + fail + ' (zkusím to znovu později).' : 'Odesláno na GitHub a smazáno z telefonu: ' + ok, fail ? 'bad' : 'ok'); }
+    if (!$('tab-runs').hidden) renderRuns();
   },
   async backupWorkouts() {
     if (!this.ready()) return;
@@ -967,7 +960,7 @@ $('ghSave').onclick = async () => {
   try { const name = await gh.verify(); $('ghToken').value = '••••••••'; gh.status('Připojeno k ' + name + '. Odesílám záznamy…', 'ok'); await gh.backupWorkouts(); await gh.syncRuns(); renderRuns(); }
   catch (e) { gh.status(e.message, 'bad'); }
 };
-$('ghSync').onclick = () => { if (!gh.ready()) { gh.status('Nejdřív nastavte repozitář a klíč.', 'bad'); return; } gh.status('Odesílám…'); gh.syncRuns().then(() => { if (!runsIndex().some(m => !m.uploaded)) gh.status('Vše je odesláno.', 'ok'); }); };
+$('ghSync').onclick = () => { if (!gh.ready()) { gh.status('Nejdřív nastavte repozitář a klíč.', 'bad'); return; } gh.status('Odesílám…'); gh.syncRuns().then(() => { if (!runsIndex().length) gh.status('Vše je odesláno.', 'ok'); }); };
 armDouble($('ghRestore'), 'Opravdu přepsat tréninky?', async () => {
   if (!gh.ready()) { gh.status('Nejdřív nastavte repozitář a klíč.', 'bad'); return; }
   try {
@@ -977,71 +970,53 @@ armDouble($('ghRestore'), 'Opravdu přepsat tréninky?', async () => {
     gh.status('Načteno tréninků: ' + workouts.length, 'ok');
   } catch (e) { gh.status('Načtení selhalo: ' + e.message, 'bad'); }
 });
-$('ghRuns').onclick = async () => {
-  if (!$('ghList').innerHTML) await renderGhList(); else $('ghList').innerHTML = '';
-};
-async function renderGhList() {
-  if (!gh.ready()) { gh.status('Nejdřív nastavte repozitář a klíč.', 'bad'); return; }
-  $('ghList').innerHTML = '<p class="muted">Načítám seznam…</p>';
-  try {
-    const list = await gh.listRuns();
-    const local = new Set(runsIndex().map(m => m.id));
-    if (!list.length) { $('ghList').innerHTML = '<p class="muted">Na GitHubu zatím žádné záznamy nejsou.</p>'; return; }
-    $('ghList').innerHTML = list.map(f =>
-      '<div class="run-item"><div class="grow"><b>' + (f.date ? f.date.toLocaleString('cs-CZ', { weekday:'short', day:'numeric', month:'numeric', year:'numeric', hour:'2-digit', minute:'2-digit' }) : escapeHtml(f.name)) + '</b>' +
-      '<div class="muted">' + Math.round((f.size || 0) / 1024) + ' kB</div></div>' +
-      (local.has(f.id) ? '<span class="muted">v telefonu</span>' : '<button class="ghost" data-restore="' + escapeHtml(f.name) + '">Obnovit</button>') + '</div>').join('');
-    $('ghList').querySelectorAll('[data-restore]').forEach(b => b.onclick = async () => {
-      b.disabled = true; b.textContent = '…';
-      try { const m = await gh.restoreOne(b.dataset.restore); b.replaceWith(Object.assign(document.createElement('span'), { className:'ok', textContent:'obnoveno' })); renderRuns(); log('Obnoven záznam ' + m.id); }
-      catch (e) { b.disabled = false; b.textContent = 'Obnovit'; gh.status('Obnovení selhalo: ' + e.message, 'bad'); }
-    });
-  } catch (e) { $('ghList').innerHTML = ''; gh.status('Seznam se nepodařilo načíst: ' + e.message, 'bad'); }
-}
 window.addEventListener('online', () => gh.syncRuns());
 setTimeout(() => gh.syncRuns(), 3000);
 
 // ---------- oprava souboru FIT z hodinek ----------
-let fitBytes = null, fitInfo = null;
+// Záznam z pásu se hledá automaticky: neodeslané v telefonu + na GitHubu v rozmezí ±3 h (jen do paměti).
 $('btnPickFit').onclick = () => $('fitIn').click();
 $('fitIn').onchange = async e => {
   const f = e.target.files[0]; e.target.value = ''; if (!f) return;
-  try {
-    fitBytes = new Uint8Array(await f.arrayBuffer());
-    fitInfo = FIT.summary(fitBytes);
-  } catch (err) { $('fixOut').innerHTML = '<p class="bad">Soubor se nepodařilo přečíst: ' + escapeHtml(err.message) + '</p>'; return; }
-  log('FIT z hodinek: ' + fitInfo.start.toISOString() + ' – ' + fitInfo.end.toISOString());
+  const out = msg => { $('fixOut').innerHTML = msg; };
+  let fitBytes, fitInfo;
+  try { fitBytes = new Uint8Array(await f.arrayBuffer()); fitInfo = FIT.summary(fitBytes); }
+  catch (err) { out('<p class="bad">Soubor se nepodařilo přečíst: ' + escapeHtml(err.message) + '</p>'); return; }
   const ws = fitInfo.start.getTime(), we = fitInfo.end.getTime();
-  const overlapLocal = () => runsIndex().some(m => { const r = store.get('pas.run.' + m.id, null); if (!r || !r.samples.length) return false;
-    return Math.min(r.samples[r.samples.length - 1][0], we) - Math.max(r.samples[0][0], ws) > 60000; });
-  if (!overlapLocal() && gh.ready()) {
-    $('fixOut').innerHTML = '<p class="muted">Záznam z pásu v telefonu není, hledám ho na GitHubu…</p>';
-    try {
-      const near = (await gh.listRuns()).filter(f => f.date && Math.abs(f.date.getTime() - ws) < 3 * 3600 * 1000 && !runsIndex().some(m => m.id === f.id));
-      for (const f of near) { const m = await gh.restoreOne(f.name); log('Pro opravu stažen z GitHubu: ' + f.name); if (overlapLocal()) break; }
-    } catch (e) { log('Hledání na GitHubu: ' + e.message); }
-  }
-  const cands = runsIndex().map(m => {
-    const r = store.get('pas.run.' + m.id, null); if (!r || !r.samples.length) return null;
-    const a = r.samples[0][0], b = r.samples[r.samples.length - 1][0];
-    return { m, overlap:Math.min(b, we) - Math.max(a, ws) };
-  }).filter(Boolean).sort((x, y) => y.overlap - x.overlap);
   const fmt = d => d.toLocaleString('cs-CZ', { day:'numeric', month:'numeric', hour:'2-digit', minute:'2-digit' });
-  let h = '<p>Běh z hodinek: <b>' + fmt(fitInfo.start) + '</b>, ' + fmtTime((we - ws) / 1000) + (fitInfo.distance != null ? ', ' + fmtKm(fitInfo.distance) + ' km podle hodinek' : '') + '</p>';
-  if (!cands.length) { $('fixOut').innerHTML = h + '<p class="bad">Nemáte uložený žádný záznam z pásu.</p>'; return; }
-  const best = cands[0].overlap > 60000 ? cands[0].m.id : '';
-  h += '<div class="row"><select id="fixRun" class="grow">' + cands.map(c =>
-    '<option value="' + c.m.id + '"' + (c.m.id === best ? ' selected' : '') + '>' + fmt(new Date(c.m.startedAt)) + ' · ' + escapeHtml(c.m.workout) + ' · ' + fmtKm(c.m.dist) + ' km' + (c.overlap > 60000 ? ' ✓ časově sedí' : '') + '</option>').join('') + '</select></div>';
-  if (!best) h += '<p class="bad">Žádný záznam z pásu se časově nepřekrývá s během z hodinek. Vyberte ho ručně, nebo zkontrolujte, že jde o správný soubor.</p>';
-  h += '<button id="btnFix">Opravit a stáhnout</button><div id="fixRes"></div>';
-  $('fixOut').innerHTML = h;
-  $('btnFix').onclick = doFix;
-};
-function doFix() {
-  const id = $('fixRun').value; const r = store.get('pas.run.' + id, null);
-  if (!r) { toast('Záznam nenalezen'); return; }
+  const head = '<p>Běh z hodinek: <b>' + fmt(fitInfo.start) + '</b>, ' + fmtTime((we - ws) / 1000) + (fitInfo.distance != null ? ', ' + fmtKm(fitInfo.distance) + ' km podle hodinek' : '') + '</p>';
+  log('FIT z hodinek: ' + fitInfo.start.toISOString() + ' – ' + fitInfo.end.toISOString());
+
+  // kandidáti: v telefonu (čekající na odeslání) + GitHub
+  const cands = [];
+  runsIndex().forEach(m => { const r = store.get('pas.run.' + m.id, null); if (r && r.samples.length) cands.push({ meta:m, samples:r.samples, src:'telefon' }); });
+  if (gh.ready()) {
+    out(head + '<p class="muted">Hledám záznam z pásu na GitHubu…</p>');
+    try {
+      const near = (await gh.listRuns()).filter(x => x.date && Math.abs(x.date.getTime() - ws) < 3 * 3600 * 1000 && !cands.some(c => c.meta.id === x.id));
+      for (const x of near) {
+        try { const d = JSON.parse(await gh.raw('zaznamy/' + x.name)); if (d.meta && Array.isArray(d.samples) && d.samples.length) cands.push({ meta:d.meta, samples:d.samples, src:'GitHub' }); }
+        catch (err) { log('GitHub – ' + x.name + ': ' + err.message); }
+      }
+    } catch (err) { log('GitHub – seznam: ' + err.message); }
+  }
+  // výběr: největší časový překryv, při shodě menší rozdíl tepu
+  const hrW = (() => { try { const fit = FIT.decode(fitBytes); const m = new Map(); fit.messages.filter(x => x.def.global === 20).forEach(x => { const h = FIT.getField(x, 3), t = FIT.getField(x, 253); if (h && t != null) m.set(t + FIT.FIT_EPOCH, h); }); return m; } catch (err) { return new Map(); } })();
+  cands.forEach(c => {
+    const a = c.samples[0][0], b = c.samples[c.samples.length - 1][0];
+    c.overlap = Math.min(b, we) - Math.max(a, ws);
+    let sum = 0, n = 0; c.samples.forEach(s => { const h = hrW.get(Math.round(s[0] / 1000)); if (h && s[4]) { sum += Math.abs(h - s[4]); n++; } });
+    c.hrErr = n >= 30 ? sum / n : 99;
+  });
+  const ok = cands.filter(c => c.overlap > 60000).sort((x, y) => (y.overlap - x.overlap) || (x.hrErr - y.hrErr));
+  if (!ok.length) {
+    out(head + '<p class="bad">Nenašel jsem záznam z pásu, který by časově odpovídal běhu z hodinek' + (gh.ready() ? ' (hledal jsem v telefonu i na GitHubu v rozmezí ±3 hodiny).' : '. GitHub není nastavený, hledal jsem jen v telefonu.') + '</p>');
+    return;
+  }
+  const c = ok[0];
+  log('Pro opravu vybrán záznam ' + c.meta.id + ' (' + c.src + '), překryv ' + Math.round(c.overlap / 1000) + ' s, rozdíl tepu ' + c.hrErr.toFixed(1));
   try {
-    const res = FIT.merge(fitBytes, r.samples, { preserve:true });
+    const res = FIT.merge(fitBytes, c.samples, { preserve:true });
     log('Oprava: posun hodin ' + res.offset + ' s, shoda tepu ' + JSON.stringify(res.hrMatch));
     const st = fitInfo.start, pad = n => String(n).padStart(2, '0');
     const name = 'pas-' + st.getFullYear() + '-' + pad(st.getMonth() + 1) + '-' + pad(st.getDate()) + '-' + pad(st.getHours()) + pad(st.getMinutes()) + '.fit';
@@ -1052,24 +1027,17 @@ function doFix() {
     if (!res.hrMatch) warn.push('Časy hodinek a pásu se nepodařilo sladit podle tepu (byly hodinky připojené k aplikaci?). Použil jsem čas bez korekce.');
     else if (res.hrMatch.error > 5) warn.push('Tep v obou záznamech se dost liší – zkontrolujte, že jde o stejný běh.');
     if (!res.stats.covered) warn.push('Záznam z pásu nepokrývá celý běh z hodinek – mimo něj je rychlost 0.');
-    $('fixRes').innerHTML = '<p class="ok">Hotovo, soubor <b>' + name + '</b> je ve stažených souborech.</p>' +
+    if (ok.length > 1) warn.push('Časově odpovídalo víc záznamů z pásu, použil jsem ten s největším překryvem.');
+    out(head + '<p>Záznam z pásu: ' + fmt(new Date(c.meta.startedAt)) + ' · ' + escapeHtml(c.meta.workout || '') + ' (' + c.src + ')</p>' +
+      '<p class="ok">Hotovo, soubor <b>' + name + '</b> je ve stažených souborech.</p>' +
       '<p>Vzdálenost ' + fmtKm(res.stats.distance) + ' km · převýšení ' + Math.round(res.stats.ascent) + ' m · ' + res.stats.laps + ' okruhů · posun hodin ' + res.offset + ' s</p>' +
       warn.map(w => '<p class="bad">' + escapeHtml(w) + '</p>').join('') +
-      '<p class="muted">Dál: na <a href="https://t.coros.com" target="_blank" rel="noopener">t.coros.com</a> → Activity List → Import Data nahrajte tento soubor a v aplikaci COROS smažte původní běh.</p>' +
-      '<button class="sec" id="btnDoneDel">Hotovo – smazat záznam z telefonu</button><div id="doneDelMsg" class="muted"></div>';
-    armDouble($('btnDoneDel'), 'Opravdu smazat z telefonu?', async () => {
-      if (gh.ready() && !runsIndex().find(m => m.id === id)?.uploaded) await gh.syncRuns();
-      const meta = runsIndex().find(m => m.id === id);
-      if (!meta) { $('doneDelMsg').textContent = 'Záznam už v telefonu není.'; return; }
-      if (!meta.uploaded) { $('doneDelMsg').innerHTML = '<span class="bad">Záznam ještě není na GitHubu, proto jsem ho ponechal. Zkuste to, až budete online.</span>'; return; }
-      store.del('pas.run.' + id); store.set('pas.runs', runsIndex().filter(m => m.id !== id)); renderRuns();
-      $('btnDoneDel').hidden = true; $('doneDelMsg').innerHTML = '<span class="ok">Smazáno z telefonu. Na GitHubu záznam zůstává.</span>';
-    });
+      '<p class="muted">Dál: na <a href="https://t.coros.com" target="_blank" rel="noopener">t.coros.com</a> → Activity List → Import Data nahrajte tento soubor a v aplikaci COROS smažte původní běh.</p>');
   } catch (err) {
     log('Chyba opravy: ' + err.stack);
-    $('fixRes').innerHTML = '<p class="bad">Oprava selhala: ' + escapeHtml(err.message) + '</p>';
+    out(head + '<p class="bad">Oprava selhala: ' + escapeHtml(err.message) + '</p>');
   }
-}
+};
 
 $('btnCopy').onclick = async () => {
   try { await navigator.clipboard.writeText(logLines.join('\n')); toast('Zkopírováno'); } catch (e) { toast('Kopírování se nepovedlo'); }
