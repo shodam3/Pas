@@ -186,6 +186,14 @@ function merge(watchBytes, samples, opts = {}) {
   const recs = msgs.filter(m => m.def.global === MSG.record);
   if (recs.length < 10) throw new Error('Soubor z hodinek neobsahuje záznam běhu');
   if (!samples || samples.length < 10) throw new Error('Záznam z pásu je prázdný');
+  // pás hlásí vzdálenost jen po 10 m – vzdálenost proto počítáme z rychlosti (lichoběžníkově)
+  if (opts.distFromSpeed !== false) {
+    let acc = 0;
+    samples = samples.map((s, i) => {
+      if (i) { const p = samples[i - 1], dt = Math.max(0, Math.min(5, (s[0] - p[0]) / 1000)); acc += (p[1] + s[1]) / 2 / 3.6 * dt; }
+      const c = s.slice(); c[2] = acc; return c;
+    });
+  }
   const unix = m => getField(m, 253) + FIT_EPOCH;
 
   // 1) časový posun hodin – podle průběhu tepu (obě řady jsou z hodinek)
