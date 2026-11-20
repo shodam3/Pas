@@ -66,6 +66,23 @@
 
   #log { font-family:ui-monospace,Consolas,monospace; font-size:.72rem; white-space:pre-wrap; max-height:50vh; overflow:auto; background:var(--bg); border-radius:8px; padding:8px; }
   .run-item { display:flex; flex-wrap:wrap; gap:6px; align-items:center; border-bottom:1px solid var(--line); padding:8px 0; }
+  /* výběr hodnot kolečky (jako v Corosu) */
+  .pick { background:var(--bg); color:var(--fg); border:1px solid var(--line); padding:8px 10px; text-align:left; }
+  .pick small { color:var(--muted); display:block; font-size:.75rem; }
+  .pick b { font-size:1.05rem; }
+  #picker { position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:40; display:flex; align-items:flex-end; }
+  #picker .sheet { background:var(--card); width:100%; max-width:680px; margin:0 auto; border-radius:16px 16px 0 0; padding:12px 12px 20px; }
+  #picker .head { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
+  #picker .head b { flex:1; text-align:center; }
+  #picker .hint { text-align:center; color:var(--muted); min-height:1.2em; margin-bottom:4px; }
+  .wheels { position:relative; display:flex; gap:4px; height:200px; }
+  .wheels::after { content:''; position:absolute; left:0; right:0; top:80px; height:40px; border-top:1px solid var(--line); border-bottom:1px solid var(--line); background:rgba(127,127,127,.08); pointer-events:none; border-radius:8px; }
+  .wheel { flex:1; height:200px; overflow-y:scroll; scroll-snap-type:y mandatory; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
+  .wheel::-webkit-scrollbar { display:none; }
+  .wheel .it { height:40px; line-height:40px; text-align:center; font-size:1.35rem; scroll-snap-align:center; color:var(--muted); font-variant-numeric:tabular-nums; }
+  .wheel .it.sel { color:var(--fg); font-weight:700; }
+  .wheel .sp { height:80px; }
+  .wcap { flex:0 0 auto; align-self:center; color:var(--muted); font-size:.9rem; }
   .toast { position:fixed; left:50%; transform:translateX(-50%); bottom:80px; background:#222; color:#fff; padding:10px 14px; border-radius:10px; z-index:30; }
 </style>
 </head>
@@ -96,6 +113,8 @@
     </div>
     <div style="height:8px"></div>
     <button class="big" id="goRun">Spustit tento trénink</button>
+    <div style="height:8px"></div>
+    <button class="big sec" id="goFree">Volný trénink (ovládání na pásu)</button>
   </section>
 
   <!-- ================= BĚH ================= -->
@@ -105,7 +124,10 @@
       <h2 id="runWName"></h2>
       <div class="muted" id="runWSum"></div>
       <div style="height:10px"></div>
-      <button class="big" id="btnBegin">Start</button>
+      <button class="big" id="btnBegin">Start tréninku</button>
+      <div style="height:8px"></div>
+      <button class="big sec" id="btnFree">Volný trénink</button>
+      <div class="muted" style="margin-top:4px">Volný trénink: aplikace začne nahrávat, až se pás rozjede. Rychlost a sklon ovládáte na pásu.</div>
       <div class="muted" style="margin-top:8px">Před startem: pás připojený, na hodinkách spuštěný běh na pásu a zapnuté vysílání tepu (Broadcast HR). Bezpečnostní klíč mějte připnutý.</div>
     </div>
     <div class="card" id="runLive" hidden>
@@ -167,6 +189,11 @@
   <button data-tab="diag">Diagnostika</button>
 </nav>
 <div id="countdown" hidden></div>
+<div id="picker" hidden><div class="sheet">
+  <div class="head"><button class="ghost" id="pkCancel">Zrušit</button><b id="pkTitle"></b><button id="pkOk">Hotovo</button></div>
+  <div class="hint" id="pkHint"></div>
+  <div class="wheels" id="pkWheels"></div>
+</div></div>
 
 <script src="fit.js"></script>
 <script>
@@ -269,19 +296,18 @@ function incOptions(sel) {
   }
   return h;
 }
+function valueLabel(s) { return s.mode === 'time' ? fmtTime(s.value) : fmtDist(s.value); }
 function stepHtml(s, path) {
-  const valIn = s.mode === 'time'
-    ? '<input class="val-in" data-f="value" value="' + fmtTime(s.value) + '" inputmode="numeric" placeholder="mm:ss"> <span class="muted">min:s</span>'
-    : '<input class="val-in" type="number" data-f="value" value="' + s.value + '" min="10" step="10"> <span class="muted">m</span>';
   const typeSel = Object.entries(TYPES).map(([k, v]) => '<option value="' + k + '"' + (k === s.type ? ' selected' : '') + '>' + v + '</option>').join('');
   return '<div class="step t-' + s.type + '" data-p="' + path + '">' +
     '<div class="row"><select data-f="type">' + typeSel + '</select>' +
     '<div class="tools"><button class="ghost" data-a="up">↑</button><button class="ghost" data-a="down">↓</button>' +
     '<button class="ghost" data-a="dup">⧉</button><button class="ghost" data-a="del">✕</button></div></div>' +
     '<div class="row"><div class="seg"><button data-a="mode" data-v="time" class="' + (s.mode === 'time' ? 'on' : '') + '">Čas</button>' +
-    '<button data-a="mode" data-v="dist" class="' + (s.mode === 'dist' ? 'on' : '') + '">Vzdálenost</button></div>' + valIn + '</div>' +
-    '<div class="row"><input type="number" data-f="speed" value="' + s.speed + '" step="0.1" min="' + limits.spdMin + '" max="' + limits.spdMax + '"> <span class="muted">km/h (' + pace(s.speed) + ' /km)</span>' +
-    '<select data-f="incline">' + incOptions(s.incline) + '</select></div></div>';
+    '<button data-a="mode" data-v="dist" class="' + (s.mode === 'dist' ? 'on' : '') + '">Vzdálenost</button></div>' +
+    '<button class="pick" data-a="pickValue"><small>' + (s.mode === 'time' ? 'Čas' : 'Vzdálenost') + '</small><b>' + valueLabel(s) + '</b></button></div>' +
+    '<div class="row"><button class="pick grow" data-a="pickPace"><small>Tempo</small><b>' + pace(s.speed) + ' /km</b> <span class="muted">(' + fmtNum(s.speed) + ' km/h)</span></button>' +
+    '<button class="pick" data-a="pickInc"><small>Sklon</small><b>' + fmtNum(s.incline) + ' %</b></button></div></div>';
 }
 function renderEditor() {
   $('wSel').innerHTML = workouts.map((w, i) => '<option value="' + i + '"' + (i === curW ? ' selected' : '') + '>' + escapeHtml(w.name || 'Bez názvu') + '</option>').join('');
@@ -289,7 +315,7 @@ function renderEditor() {
   let h = '';
   W().steps.forEach((it, i) => {
     if (it.kind === 'repeat') {
-      h += '<div class="repeat" data-p="' + i + '"><div class="row"><b>Opakovat</b><input type="number" data-f="count" value="' + it.count + '" min="1" max="99" style="width:64px"><b>×</b>' +
+      h += '<div class="repeat" data-p="' + i + '"><div class="row"><b>Opakovat</b><button class="pick" data-a="pickCount"><b>' + it.count + '×</b></button>' +
         '<div class="tools"><button class="ghost" data-a="up">↑</button><button class="ghost" data-a="down">↓</button>' +
         '<button class="ghost" data-a="dup">⧉</button><button class="ghost" data-a="del">✕</button></div></div>';
       it.steps.forEach((s, j) => h += stepHtml(s, i + '.' + j));
@@ -328,6 +354,7 @@ $('steps').addEventListener('click', e => {
   else if (a === 'dup') arr.splice(i + 1, 0, JSON.parse(JSON.stringify(arr[i])));
   else if (a === 'del') arr.splice(i, 1);
   else if (a === 'addIn') arr[i].steps.push(newStep('run'));
+  else if (a.startsWith('pick')) { openStepPicker(a, arr[i]); return; }
   else if (a === 'mode') {
     const s = arr[i], m = b.dataset.v; if (s.mode === m) return;
     s.value = m === 'dist' ? Math.max(10, Math.round(stepMeters(s) / 10) * 10) : Math.max(10, Math.round(stepSeconds(s) / 5) * 5);
@@ -335,6 +362,75 @@ $('steps').addEventListener('click', e => {
   } else return;
   changed();
 });
+// ---------- výběr kolečky ----------
+const range = (a, b, st = 1) => { const r = []; for (let v = a; v <= b + 1e-9; v += st) r.push(Math.round(v * 10) / 10); return r; };
+const pad2 = n => String(n).padStart(2, '0');
+let pk = null;
+function openPicker(o) {
+  pk = o;
+  $('pkTitle').textContent = o.title;
+  const W = $('pkWheels'); W.innerHTML = '';
+  o.cols.forEach((c, ci) => {
+    const w = document.createElement('div'); w.className = 'wheel';
+    w.innerHTML = '<div class="sp"></div>' + c.values.map((v, i) => '<div class="it" data-i="' + i + '">' + (c.fmt ? c.fmt(v) : v) + '</div>').join('') + '<div class="sp"></div>';
+    W.appendChild(w);
+    if (c.cap) { const cap = document.createElement('div'); cap.className = 'wcap'; cap.textContent = c.cap; W.appendChild(cap); }
+    let tm;
+    w.addEventListener('scroll', () => { clearTimeout(tm); tm = setTimeout(() => mark(), 60); });
+    c.el = w;
+  });
+  $('picker').hidden = false;
+  requestAnimationFrame(() => { o.cols.forEach(c => { c.el.scrollTop = Math.max(0, c.index) * 40; }); mark(); });
+  function mark() {
+    const idx = o.cols.map(c => Math.max(0, Math.min(c.values.length - 1, Math.round(c.el.scrollTop / 40))));
+    o.cols.forEach((c, ci) => c.el.querySelectorAll('.it').forEach((e, i) => e.classList.toggle('sel', i === idx[ci])));
+    $('pkHint').textContent = o.hint ? o.hint(idx.map((i, ci) => o.cols[ci].values[i])) : '';
+  }
+}
+function closePicker(ok) {
+  if (ok && pk) {
+    const vals = pk.cols.map(c => c.values[Math.max(0, Math.min(c.values.length - 1, Math.round(c.el.scrollTop / 40)))]);
+    pk.ok(vals);
+  }
+  $('picker').hidden = true; pk = null;
+}
+$('pkOk').onclick = () => closePicker(true);
+$('pkCancel').onclick = () => closePicker(false);
+$('picker').addEventListener('click', e => { if (e.target.id === 'picker') closePicker(false); });
+
+function speedFromPace(min, sec) {
+  const t = min * 60 + sec; if (!t) return limits.spdMax;
+  return Math.min(limits.spdMax, Math.max(limits.spdMin, Math.round(36000 / t) / 10));
+}
+function openStepPicker(a, it) {
+  if (a === 'pickCount') {
+    const vals = range(1, 50);
+    openPicker({ title:'Počet opakování', cols:[{ values:vals, index:vals.indexOf(it.count), cap:'×' }], ok:v => { it.count = v[0]; changed(); } });
+  } else if (a === 'pickValue' && it.mode === 'time') {
+    const h = Math.floor(it.value / 3600), m = Math.floor(it.value % 3600 / 60), sec = it.value % 60;
+    openPicker({ title:'Čas úseku', cols:[
+      { values:range(0, 5), index:h, cap:'h' }, { values:range(0, 59), index:m, fmt:pad2, cap:'min' }, { values:range(0, 59), index:sec, fmt:pad2, cap:'s' } ],
+      hint:v => v[0] * 3600 + v[1] * 60 + v[2] < 5 ? 'Minimum je 5 s' : '',
+      ok:v => { const t = v[0] * 3600 + v[1] * 60 + v[2]; if (t >= 5) { it.value = t; changed(); } else toast('Čas musí být aspoň 5 s'); } });
+  } else if (a === 'pickValue') {
+    const km = Math.floor(it.value / 1000), m = Math.round(it.value % 1000 / 10) * 10;
+    const mv = range(0, 990, 10);
+    openPicker({ title:'Vzdálenost úseku', cols:[
+      { values:range(0, 99), index:km, cap:'km' }, { values:mv, index:mv.indexOf(m), fmt:v => String(v).padStart(3, '0'), cap:'m' } ],
+      ok:v => { const d = v[0] * 1000 + v[1]; if (d >= 10) { it.value = d; changed(); } else toast('Vzdálenost musí být aspoň 10 m'); } });
+  } else if (a === 'pickPace') {
+    const p = 3600 / it.speed, minMax = Math.min(30, Math.ceil(3600 / limits.spdMin / 60)), minMin = Math.floor(3600 / limits.spdMax / 60);
+    const mins = range(minMin, minMax);
+    openPicker({ title:'Tempo (min/km)', cols:[
+      { values:mins, index:Math.max(0, mins.indexOf(Math.floor(p / 60))), cap:':' }, { values:range(0, 59), index:Math.round(p % 60) % 60, fmt:pad2, cap:'/km' } ],
+      hint:v => { const sp = speedFromPace(v[0], v[1]); return '= ' + fmtNum(sp) + ' km/h na pásu' + (sp === limits.spdMax ? ' (maximum pásu)' : ''); },
+      ok:v => { it.speed = speedFromPace(v[0], v[1]); changed(); } });
+  } else if (a === 'pickInc') {
+    const vals = range(limits.incMin, limits.incMax, limits.incStep);
+    openPicker({ title:'Sklon', cols:[{ values:vals, index:Math.max(0, vals.indexOf(it.incline)), fmt:v => fmtNum(v), cap:'%' }], ok:v => { it.incline = v[0]; changed(); } });
+  }
+}
+
 $('addStep').onclick = () => { const st = W().steps; st.push(newStep(st.length ? 'run' : 'warmup')); changed(); };
 $('addRepeat').onclick = () => { W().steps.push({ kind:'repeat', count:4, steps:[newStep('run'), newStep('rest')] }); changed(); };
 $('wSel').onchange = e => { curW = +e.target.value; changed(); };
@@ -558,6 +654,7 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 
 const engine = {
   async begin() {
+    if (run && !run.finished) return;
     if (!tmConnected) { toast('Nejdřív připojte pás (nahoře)'); return; }
     plan = flatten(W());
     if (!plan.length) { toast('Trénink nemá žádné úseky'); return; }
@@ -569,10 +666,28 @@ const engine = {
     run = { id:uid(), workout:W().name, plan, startedAt:Date.now(), stepIdx:0, active:0, dist:0,
             stepStartActive:0, stepStartDist:0, paused:false, pauseReason:'', zeroSince:0, graceUntil:0,
             samples:[], finished:false, lastTick:Date.now(), lastSample:0, lastBeepSec:-1 };
-    $('runIdle').hidden = true; $('runDone').hidden = true; $('runLive').hidden = false;
+    this.showLive(false);
     await this.startBelt();
     tickTimer = setInterval(() => this.tick(), 250);
     beep(990, 300);
+  },
+  // volný trénink: žádné povely, nahrává se od rozjetí pásu do ukončení
+  beginFree() {
+    if (run && !run.finished) return;
+    if (!tmConnected) { toast('Nejdřív připojte pás (nahoře)'); return; }
+    beep(600, 1); keepAwake();
+    plan = [{ type:'run', mode:'free', speed:0, incline:0 }];
+    run = { id:uid(), workout:'Volný trénink', free:true, waiting:true, plan, startedAt:Date.now(), stepIdx:0, active:0, dist:0,
+            stepStartActive:0, stepStartDist:0, paused:false, pauseReason:'', zeroSince:0, graceUntil:0,
+            samples:[], finished:false, lastTick:Date.now(), lastSample:0, lastBeepSec:-1 };
+    this.showLive(true);
+    tickTimer = setInterval(() => this.tick(), 250);
+  },
+  showLive(free) {
+    $('runIdle').hidden = true; $('runDone').hidden = true; $('runLive').hidden = false;
+    $('btnPause').hidden = free; $('btnSkip').hidden = free;
+    $('btnPause').textContent = 'Pauza';
+    $('lvBar').parentElement.hidden = free;
   },
   async startBelt() {
     run.graceUntil = Date.now() + 8000;
@@ -584,12 +699,19 @@ const engine = {
     await this.applyTargets();
   },
   async applyTargets() {
+    if (run.free) return;
     const s = plan[run.stepIdx]; if (!s) return;
     await setSpeed(s.speed);
     await setIncline(s.incline);
   },
   tick() {
-    const now = Date.now(), dt = (now - run.lastTick) / 1000; run.lastTick = now;
+    const now = Date.now();
+    if (run.free && run.waiting) {
+      run.lastTick = now;
+      if (live.speed > 0) { run.waiting = false; run.startedAt = now; run.dist = 0; beep(990, 300); log('Volný trénink: pás se rozjel, nahrávám'); }
+      else { this.render(); return; }
+    }
+    const dt = (now - run.lastTick) / 1000; run.lastTick = now;
     if (!run.paused) run.active += dt;
     // záznam jednou za sekundu
     if (now - run.lastSample >= 1000) {
@@ -604,7 +726,7 @@ const engine = {
     } else run.zeroSince = 0;
     // konec úseku
     const s = plan[run.stepIdx];
-    if (!run.paused && s) {
+    if (!run.paused && s && !run.free) {
       if (s.mode === 'time') {
         const left = s.value - (run.active - run.stepStartActive);
         const ls = Math.ceil(left);
@@ -648,17 +770,30 @@ const engine = {
     if (!run || run.finished) return;
     run.finished = true; run.completed = completed; run.endedAt = Date.now();
     clearInterval(tickTimer);
-    await cmd([0x08, 0x01], 'stop');
+    if (run.free && run.waiting) { this.banner(''); $('runLive').hidden = true; $('runIdle').hidden = false; run = null; return; }
+    if (!run.free) await cmd([0x08, 0x01], 'stop');
     saveRun(run); store.del('pas.current');
     try { wakeLock && wakeLock.release(); } catch (e) {}
     beep(990, 600);
     $('runLive').hidden = true; $('runDone').hidden = false;
-    $('doneSum').innerHTML = '<b>' + escapeHtml(run.workout) + '</b><br>Čas ' + fmtTime(run.active) + ' · ' + fmtKm(run.dist) + ' km' + (completed ? '' : ' (ukončeno předčasně)');
+    $('doneSum').innerHTML = '<b>' + escapeHtml(run.workout) + '</b><br>Čas ' + fmtTime(run.active) + ' · ' + fmtKm(run.dist) + ' km' + (completed || run.free ? '' : ' (ukončeno předčasně)');
     this.banner('');
     setTimeout(() => { $('runIdle').hidden = false; }, 100);
   },
   banner(t) { $('runBanner').innerHTML = t ? '<div class="banner">' + escapeHtml(t) + '</div>' : ''; },
   render() {
+    if (run.free) {
+      $('lvStep').textContent = 'Volný trénink'; $('lvIdx').textContent = '';
+      $('lvRemain').textContent = run.waiting ? 'Čekám na rozjetí pásu…' : fmtTime(run.active);
+      $('lvRemain').style.fontSize = run.waiting ? '1.4rem' : '';
+      $('lvTarget').textContent = run.waiting ? 'Spusťte pás na konzoli. Nahrávání začne samo.' : 'Rychlost a sklon ovládáte na pásu.';
+      $('lvNext').textContent = '';
+      $('mSpd').textContent = fmtNum(live.speed); $('mInc').textContent = fmtNum(live.incline);
+      $('mHr').textContent = live.hr || live.tmHr || '–'; $('mPace').textContent = pace(live.speed);
+      $('mTime').textContent = fmtTime(run.active); $('mDist').textContent = fmtKm(run.dist);
+      return;
+    }
+    $('lvRemain').style.fontSize = '';
     const s = plan[run.stepIdx]; if (!s) return;
     $('lvStep').textContent = TYPES[s.type] + (s.rep ? ' ' + s.rep : '');
     $('lvIdx').textContent = 'úsek ' + (run.stepIdx + 1) + ' z ' + plan.length;
@@ -678,9 +813,11 @@ const engine = {
   }
 };
 $('btnBegin').onclick = () => engine.begin();
+$('btnFree').onclick = () => engine.beginFree();
+$('goFree').onclick = () => { showTab('run'); engine.beginFree(); };
 $('btnPause').onclick = () => run && !run.finished && engine.setPaused(!run.paused, 'user');
 $('btnSkip').onclick = () => run && !run.finished && engine.next();
-armDouble($('btnEnd'), 'Opravdu ukončit?', () => run && !run.finished && engine.finish(false));
+armDouble($('btnEnd'), 'Opravdu ukončit?', () => run && !run.finished && engine.finish(!!run.free));
 
 // ================= ZÁZNAMY =================
 function runsIndex() { return store.get('pas.runs', []); }
