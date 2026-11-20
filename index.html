@@ -3,318 +3,727 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Zkouška pásu Domyos</title>
+<title>Pás</title>
 <style>
-  :root { --bg:#f6f7f9; --fg:#1d2330; --muted:#667085; --card:#fff; --line:#e3e6eb; --acc:#0b6bcb; --ok:#127a3e; --bad:#b42318; }
+  :root { --bg:#f4f5f7; --fg:#1d2330; --muted:#667085; --card:#fff; --line:#e3e6eb; --acc:#0b6bcb; --ok:#127a3e; --bad:#b42318;
+          --c-warmup:#e8890c; --c-run:#0b6bcb; --c-rest:#1f9d55; --c-cooldown:#7a4fd1; }
   @media (prefers-color-scheme: dark) {
-    :root { --bg:#14171c; --fg:#e8eaef; --muted:#98a2b3; --card:#1d2128; --line:#2c323c; --acc:#4b9cf0; --ok:#4cc27a; --bad:#f2786c; }
+    :root { --bg:#121419; --fg:#e8eaef; --muted:#98a2b3; --card:#1c2027; --line:#2c323c; --acc:#4b9cf0; --ok:#4cc27a; --bad:#f2786c; }
   }
   * { box-sizing:border-box; }
-  body { margin:0; font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--fg); }
-  main { max-width:640px; margin:0 auto; padding:16px; }
-  h1 { font-size:1.3rem; margin:4px 0 12px; }
-  h2 { font-size:1rem; margin:0 0 10px; }
-  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; margin-bottom:12px; }
-  button { font:inherit; padding:10px 14px; border-radius:10px; border:1px solid var(--acc); background:var(--acc); color:#fff; cursor:pointer; margin:3px 4px 3px 0; }
+  html, body { margin:0; background:var(--bg); color:var(--fg); font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  main { max-width:680px; margin:0 auto; padding:10px 12px 90px; }
+  h2 { font-size:1.05rem; margin:4px 0 10px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px; margin-bottom:10px; }
+  button { font:inherit; padding:9px 12px; border-radius:10px; border:1px solid var(--acc); background:var(--acc); color:#fff; cursor:pointer; }
   button.sec { background:transparent; color:var(--acc); }
-  button.stop { background:var(--bad); border-color:var(--bad); }
+  button.ghost { background:transparent; border-color:var(--line); color:var(--fg); padding:6px 9px; }
+  button.danger { background:var(--bad); border-color:var(--bad); }
   button:disabled { opacity:.4; cursor:default; }
-  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(130px,1fr)); gap:8px; }
-  .val { border:1px solid var(--line); border-radius:10px; padding:8px; }
-  .val b { display:block; font-size:1.35rem; }
-  .val span { font-size:.8rem; color:var(--muted); }
+  button.big { font-size:1.15rem; padding:14px 18px; width:100%; }
+  input, select { font:inherit; padding:7px 8px; border-radius:8px; border:1px solid var(--line); background:var(--bg); color:var(--fg); }
+  input[type=number] { width:80px; }
   .row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:6px 0; }
-  input[type=number] { font:inherit; width:90px; padding:8px; border-radius:8px; border:1px solid var(--line); background:var(--bg); color:var(--fg); }
-  .status { font-size:.9rem; color:var(--muted); }
+  .muted { color:var(--muted); font-size:.85rem; }
   .ok { color:var(--ok); } .bad { color:var(--bad); }
-  #log { font-family:ui-monospace,Consolas,monospace; font-size:.75rem; white-space:pre-wrap; max-height:260px; overflow:auto; background:var(--bg); border-radius:8px; padding:8px; }
-  .warn { border-left:4px solid var(--bad); }
+  .grow { flex:1; }
+
+  /* lišta s připojením */
+  #conn { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .pill { font-size:.85rem; padding:6px 10px; border-radius:999px; border:1px solid var(--line); background:var(--card); cursor:pointer; color:var(--fg); }
+  .pill.on { border-color:var(--ok); color:var(--ok); }
+
+  /* záložky */
+  nav { position:fixed; bottom:0; left:0; right:0; display:flex; background:var(--card); border-top:1px solid var(--line); z-index:5; }
+  nav button { flex:1; border:0; border-radius:0; background:transparent; color:var(--muted); padding:14px 4px; }
+  nav button.on { color:var(--acc); font-weight:600; }
+  section[hidden] { display:none; }
+
+  /* editor */
+  .step { border:1px solid var(--line); border-left:6px solid var(--c-run); border-radius:10px; padding:8px 10px; margin:8px 0; background:var(--card); }
+  .step.t-warmup { border-left-color:var(--c-warmup); }
+  .step.t-rest { border-left-color:var(--c-rest); }
+  .step.t-cooldown { border-left-color:var(--c-cooldown); }
+  .repeat { border:2px dashed var(--line); border-radius:12px; padding:8px 10px; margin:8px 0; }
+  .seg { display:inline-flex; border:1px solid var(--acc); border-radius:8px; overflow:hidden; }
+  .seg button { border:0; border-radius:0; background:transparent; color:var(--acc); padding:6px 10px; }
+  .seg button.on { background:var(--acc); color:#fff; }
+  .tools { margin-left:auto; display:flex; gap:4px; }
+  .tools button { padding:4px 8px; }
+  .val-in { width:90px; }
+
+  /* běh */
+  .big-step { font-size:1.4rem; font-weight:700; }
+  .remain { font-size:3.2rem; font-weight:700; font-variant-numeric:tabular-nums; line-height:1.1; }
+  .metrics { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:10px; }
+  .m { border:1px solid var(--line); border-radius:10px; padding:8px; text-align:center; }
+  .m b { display:block; font-size:1.6rem; font-variant-numeric:tabular-nums; }
+  .m span { font-size:.75rem; color:var(--muted); }
+  .bar { height:8px; background:var(--line); border-radius:4px; overflow:hidden; margin:8px 0; }
+  .bar div { height:100%; background:var(--acc); width:0; }
+  .banner { padding:10px; border-radius:10px; background:var(--bad); color:#fff; margin-bottom:10px; }
+  #countdown { position:fixed; inset:0; background:rgba(0,0,0,.75); color:#fff; display:flex; align-items:center; justify-content:center; font-size:7rem; font-weight:800; z-index:20; }
+
+  #log { font-family:ui-monospace,Consolas,monospace; font-size:.72rem; white-space:pre-wrap; max-height:50vh; overflow:auto; background:var(--bg); border-radius:8px; padding:8px; }
+  .run-item { display:flex; flex-wrap:wrap; gap:6px; align-items:center; border-bottom:1px solid var(--line); padding:8px 0; }
+  .toast { position:fixed; left:50%; transform:translateX(-50%); bottom:80px; background:#222; color:#fff; padding:10px 14px; border-radius:10px; z-index:30; }
 </style>
 </head>
 <body>
 <main>
-  <h1>Zkouška pásu Domyos Run 500</h1>
-
-  <div class="card warn" id="nobt" hidden>
-    <b>Bluetooth není v tomto prohlížeči nebo na této stránce dostupný.</b>
-    <div class="status" id="nobtWhy"></div>
+  <div class="card" id="conn">
+    <button class="pill" id="pillTm">Pás: nepřipojen</button>
+    <button class="pill" id="pillHr">Hodinky: nepřipojeny</button>
+    <span class="muted" id="btWarn"></span>
   </div>
 
-  <div class="card">
-    <h2>1. Připojení</h2>
-    <button id="btnTm">Připojit pás</button>
-    <button id="btnTmAll" class="sec">Pás se nenašel? Zobrazit všechna zařízení</button>
-    <div class="status" id="tmStatus">Pás nepřipojen.</div>
+  <!-- ================= TRÉNINKY ================= -->
+  <section id="tab-edit">
+    <div class="card">
+      <div class="row">
+        <select id="wSel" class="grow"></select>
+        <button class="ghost" id="wNew">Nový</button>
+        <button class="ghost" id="wCopy">Kopie</button>
+        <button class="ghost" id="wDel">Smazat</button>
+      </div>
+      <div class="row"><input id="wName" class="grow" placeholder="Název tréninku"></div>
+      <div class="muted" id="wSum"></div>
+    </div>
+    <div id="steps"></div>
+    <div class="row">
+      <button class="sec" id="addStep">+ Úsek</button>
+      <button class="sec" id="addRepeat">+ Opakování</button>
+    </div>
     <div style="height:8px"></div>
-    <button id="btnHr" class="sec">Připojit hodinky (tep) – volitelné</button>
-    <div class="status" id="hrStatus">Na hodinkách nejdřív zapněte Broadcast HR.</div>
-  </div>
+    <button class="big" id="goRun">Spustit tento trénink</button>
+  </section>
 
-  <div class="card">
-    <h2>2. Co pás posílá</h2>
-    <div class="grid" id="vals"></div>
-    <div class="status" id="feat" style="margin-top:8px"></div>
-  </div>
+  <!-- ================= BĚH ================= -->
+  <section id="tab-run" hidden>
+    <div id="runBanner"></div>
+    <div class="card" id="runIdle">
+      <h2 id="runWName"></h2>
+      <div class="muted" id="runWSum"></div>
+      <div style="height:10px"></div>
+      <button class="big" id="btnBegin">Start</button>
+      <div class="muted" style="margin-top:8px">Před startem: pás připojený, na hodinkách spuštěný běh na pásu a zapnuté vysílání tepu (Broadcast HR). Bezpečnostní klíč mějte připnutý.</div>
+    </div>
+    <div class="card" id="runLive" hidden>
+      <div class="row"><span class="big-step" id="lvStep"></span><span class="muted grow" style="text-align:right" id="lvIdx"></span></div>
+      <div class="remain" id="lvRemain">0:00</div>
+      <div class="muted" id="lvTarget"></div>
+      <div class="bar"><div id="lvBar"></div></div>
+      <div class="metrics">
+        <div class="m"><b id="mSpd">–</b><span>km/h</span></div>
+        <div class="m"><b id="mInc">–</b><span>sklon %</span></div>
+        <div class="m"><b id="mHr">–</b><span>tep</span></div>
+        <div class="m"><b id="mPace">–</b><span>tempo /km</span></div>
+        <div class="m"><b id="mTime">0:00</b><span>čas</span></div>
+        <div class="m"><b id="mDist">0,00</b><span>km</span></div>
+      </div>
+      <div class="muted" style="margin-top:8px" id="lvNext"></div>
+      <div class="row" style="margin-top:10px">
+        <button class="grow" id="btnPause">Pauza</button>
+        <button class="grow sec" id="btnSkip">Další úsek</button>
+        <button class="grow danger" id="btnEnd">Ukončit</button>
+      </div>
+    </div>
+    <div class="card" id="runDone" hidden>
+      <h2>Trénink dokončen</h2>
+      <div id="doneSum"></div>
+      <div class="muted" style="margin-top:8px">Záznam je uložený v záložce Záznamy. Na hodinkách běh ukončete a uložte.</div>
+    </div>
+  </section>
 
-  <div class="card">
-    <h2>3. Zkouška ovládání</h2>
-    <div class="status">Postavte se na boční lišty nebo mějte bezpečnostní klíč po ruce. Začněte nízkou rychlostí.</div>
-    <div class="row">
-      <button id="btnCtl" disabled>Převzít ovládání</button>
-      <button id="btnStart" disabled>Start</button>
-      <button id="btnStop" class="stop" disabled>Stop</button>
+  <!-- ================= ZÁZNAMY ================= -->
+  <section id="tab-runs" hidden>
+    <div class="card">
+      <h2>Uložené záznamy</h2>
+      <div class="muted">Záznamy jsou uložené jen v tomto prohlížeči. Opravu záznamu z hodinek doplním v dalším kroku.</div>
+      <div id="runsList"></div>
     </div>
-    <div class="row">
-      Rychlost <input type="number" id="spd" value="3" step="0.1" min="0.5" max="20"> km/h
-      <button id="btnSpd" disabled>Nastavit</button>
-    </div>
-    <div class="row">
-      Sklon <input type="number" id="inc" value="1" step="0.5" min="0" max="10"> %
-      <button id="btnInc" disabled>Nastavit</button>
-    </div>
-  </div>
+  </section>
 
-  <div class="card">
-    <h2>4. Záznam komunikace</h2>
-    <div class="status">Pokud něco nefunguje, zkopírujte mi tento záznam.</div>
-    <button id="btnCopy" class="sec">Zkopírovat záznam</button>
-    <div id="log"></div>
-  </div>
+  <!-- ================= DIAGNOSTIKA ================= -->
+  <section id="tab-diag" hidden>
+    <div class="card">
+      <h2>Záznam komunikace</h2>
+      <button class="sec" id="btnCopy">Zkopírovat</button>
+      <div id="log" style="margin-top:8px"></div>
+    </div>
+  </section>
 </main>
 
-<script>
-const FTMS = 0x1826, HRS = 0x180D;
-const CH = { feature:0x2ACC, tmData:0x2ACD, ctrl:0x2AD9, status:0x2ADA, spdRange:0x2AD4, incRange:0x2AD5, trainStatus:0x2AD3 };
-const $ = id => document.getElementById(id);
-let ctrlChar = null, tmDevice = null, wakeLock = null;
-let logLines = [];
+<nav>
+  <button data-tab="edit" class="on">Tréninky</button>
+  <button data-tab="run">Běh</button>
+  <button data-tab="runs">Záznamy</button>
+  <button data-tab="diag">Diagnostika</button>
+</nav>
+<div id="countdown" hidden></div>
 
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const TYPES = { warmup:'Rozklus', run:'Úsek', rest:'Odpočinek', cooldown:'Výklus' };
+
+// ---------------- pomocné ----------------
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { toast('Nepodařilo se uložit data'); return false; } },
+  del(k) { try { localStorage.removeItem(k); } catch (e) {} }
+};
+function toast(msg, ms = 2500) {
+  const d = document.createElement('div'); d.className = 'toast'; d.textContent = msg;
+  document.body.appendChild(d); setTimeout(() => d.remove(), ms);
+}
+function fmtTime(s) {
+  s = Math.max(0, Math.round(s));
+  const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), sec = s % 60;
+  return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(sec).padStart(2, '0');
+}
+function parseTime(str) {
+  str = String(str).trim().replace(',', '.');
+  if (!str) return NaN;
+  if (!str.includes(':')) return Math.round(parseFloat(str) * 60);   // samotné číslo = minuty
+  const p = str.split(':').map(Number);
+  if (p.some(isNaN)) return NaN;
+  return p.length === 3 ? p[0] * 3600 + p[1] * 60 + p[2] : p[0] * 60 + p[1];
+}
+const fmtKm = m => (m / 1000).toFixed(2).replace('.', ',');
+const fmtNum = (v, d = 1) => v == null || isNaN(v) ? '–' : v.toFixed(d).replace('.', ',');
+const pace = kmh => kmh > 0.5 ? fmtTime(3600 / kmh) : '–';
+function fmtDist(m) { return m >= 1000 ? fmtKm(m) + ' km' : Math.round(m) + ' m'; }
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
+let logLines = [];
 function log(msg) {
   const t = new Date().toLocaleTimeString('cs-CZ');
   logLines.push(t + '  ' + msg);
-  if (logLines.length > 400) logLines.shift();
-  $('log').textContent = logLines.slice().reverse().join('\n');
+  if (logLines.length > 600) logLines.shift();
+  if (!$('tab-diag').hidden) renderLog();
 }
-const hex = dv => Array.from(new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength)).map(b => b.toString(16).padStart(2,'0')).join(' ');
+function renderLog() { $('log').textContent = logLines.slice().reverse().join('\n'); }
+const hex = dv => Array.from(new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength)).map(b => b.toString(16).padStart(2, '0')).join(' ');
 
-// ---- zobrazení hodnot ----
-const shown = {};
-function setVal(key, label, value) {
-  if (!shown[key]) {
-    const d = document.createElement('div'); d.className = 'val';
-    d.innerHTML = '<b></b><span></span>'; $('vals').appendChild(d); shown[key] = d;
-  }
-  shown[key].querySelector('b').textContent = value;
-  shown[key].querySelector('span').textContent = label;
+// ---------------- záložky ----------------
+function showTab(name) {
+  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === name));
+  ['edit', 'run', 'runs', 'diag'].forEach(t => $('tab-' + t).hidden = t !== name);
+  if (name === 'runs') renderRuns();
+  if (name === 'diag') renderLog();
+  if (name === 'run') renderRunIdle();
+}
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => showTab(b.dataset.tab));
+
+// ================= TRÉNINKY (editor) =================
+function newStep(type = 'run') {
+  const d = { warmup:[600, 8], run:[300, 11], rest:[120, 7], cooldown:[600, 7.5] }[type];
+  return { kind:'step', type, mode:'time', value:d[0], speed:d[1], incline:1 };
+}
+function sampleWorkout() {
+  return { id:uid(), name:'Ukázka: 5× 3 min', steps:[
+    { kind:'step', type:'warmup', mode:'time', value:600, speed:8, incline:1 },
+    { kind:'repeat', count:5, steps:[
+      { kind:'step', type:'run', mode:'time', value:180, speed:12, incline:1 },
+      { kind:'step', type:'rest', mode:'time', value:120, speed:7, incline:1 } ] },
+    { kind:'step', type:'cooldown', mode:'dist', value:1000, speed:7.5, incline:0 } ] };
+}
+let workouts = store.get('pas.workouts', null);
+if (!Array.isArray(workouts) || !workouts.length) workouts = [sampleWorkout()];
+let curW = Math.min(store.get('pas.curW', 0), workouts.length - 1);
+const W = () => workouts[curW];
+function saveWorkouts() { store.set('pas.workouts', workouts); store.set('pas.curW', curW); }
+
+function flatten(w) {
+  const out = [];
+  w.steps.forEach(it => {
+    if (it.kind === 'repeat') {
+      for (let r = 1; r <= it.count; r++) it.steps.forEach(s => out.push({ ...s, rep: r + '/' + it.count }));
+    } else out.push({ ...it });
+  });
+  return out;
+}
+function stepSeconds(s) { return s.mode === 'time' ? s.value : s.value / (s.speed / 3.6); }
+function stepMeters(s) { return s.mode === 'dist' ? s.value : s.value * s.speed / 3.6; }
+function summary(w) {
+  const f = flatten(w);
+  const t = f.reduce((a, s) => a + stepSeconds(s), 0), d = f.reduce((a, s) => a + stepMeters(s), 0);
+  return 'Celkem asi ' + fmtTime(t) + ' · ' + fmtKm(d) + ' km · ' + f.length + ' úseků';
 }
 
-// ---- kontrola dostupnosti ----
-async function checkBt() {
-  if (!('bluetooth' in navigator)) {
-    $('nobt').hidden = false;
-    $('nobtWhy').textContent = 'Prohlížeč nepodporuje Web Bluetooth. Použijte Chrome na Androidu nebo počítači.';
-    return false;
+let limits = { spdMin:1, spdMax:16, incMin:0, incMax:10, incStep:0.5 };
+function incOptions(sel) {
+  let h = '';
+  for (let v = limits.incMin; v <= limits.incMax + 1e-9; v += limits.incStep) {
+    const r = Math.round(v * 10) / 10;
+    h += '<option value="' + r + '"' + (Math.abs(r - sel) < 1e-6 ? ' selected' : '') + '>' + fmtNum(r) + ' %</option>';
   }
-  try {
-    if (navigator.bluetooth.getAvailability && !(await navigator.bluetooth.getAvailability())) {
-      $('nobt').hidden = false;
-      $('nobtWhy').textContent = 'Bluetooth je vypnutý, nebo ho stránka nesmí použít.';
-    }
-  } catch (e) {}
+  return h;
+}
+function stepHtml(s, path) {
+  const valIn = s.mode === 'time'
+    ? '<input class="val-in" data-f="value" value="' + fmtTime(s.value) + '" inputmode="numeric" placeholder="mm:ss"> <span class="muted">min:s</span>'
+    : '<input class="val-in" type="number" data-f="value" value="' + s.value + '" min="10" step="10"> <span class="muted">m</span>';
+  const typeSel = Object.entries(TYPES).map(([k, v]) => '<option value="' + k + '"' + (k === s.type ? ' selected' : '') + '>' + v + '</option>').join('');
+  return '<div class="step t-' + s.type + '" data-p="' + path + '">' +
+    '<div class="row"><select data-f="type">' + typeSel + '</select>' +
+    '<div class="tools"><button class="ghost" data-a="up">↑</button><button class="ghost" data-a="down">↓</button>' +
+    '<button class="ghost" data-a="dup">⧉</button><button class="ghost" data-a="del">✕</button></div></div>' +
+    '<div class="row"><div class="seg"><button data-a="mode" data-v="time" class="' + (s.mode === 'time' ? 'on' : '') + '">Čas</button>' +
+    '<button data-a="mode" data-v="dist" class="' + (s.mode === 'dist' ? 'on' : '') + '">Vzdálenost</button></div>' + valIn + '</div>' +
+    '<div class="row"><input type="number" data-f="speed" value="' + s.speed + '" step="0.1" min="' + limits.spdMin + '" max="' + limits.spdMax + '"> <span class="muted">km/h (' + pace(s.speed) + ' /km)</span>' +
+    '<select data-f="incline">' + incOptions(s.incline) + '</select></div></div>';
+}
+function renderEditor() {
+  $('wSel').innerHTML = workouts.map((w, i) => '<option value="' + i + '"' + (i === curW ? ' selected' : '') + '>' + escapeHtml(w.name || 'Bez názvu') + '</option>').join('');
+  $('wName').value = W().name;
+  let h = '';
+  W().steps.forEach((it, i) => {
+    if (it.kind === 'repeat') {
+      h += '<div class="repeat" data-p="' + i + '"><div class="row"><b>Opakovat</b><input type="number" data-f="count" value="' + it.count + '" min="1" max="99" style="width:64px"><b>×</b>' +
+        '<div class="tools"><button class="ghost" data-a="up">↑</button><button class="ghost" data-a="down">↓</button>' +
+        '<button class="ghost" data-a="dup">⧉</button><button class="ghost" data-a="del">✕</button></div></div>';
+      it.steps.forEach((s, j) => h += stepHtml(s, i + '.' + j));
+      h += '<button class="sec" data-a="addIn">+ Úsek do opakování</button></div>';
+    } else h += stepHtml(it, String(i));
+  });
+  $('steps').innerHTML = h || '<div class="muted">Zatím žádné úseky.</div>';
+  $('wSum').textContent = summary(W());
+}
+function escapeHtml(s) { return String(s).replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c])); }
+function locate(path) {
+  const p = path.split('.').map(Number);
+  return p.length === 1 ? { arr:W().steps, i:p[0] } : { arr:W().steps[p[0]].steps, i:p[1] };
+}
+function changed() { saveWorkouts(); renderEditor(); }
+
+$('steps').addEventListener('change', e => {
+  const f = e.target.dataset.f; if (!f) return;
+  const host = e.target.closest('[data-p]'); const { arr, i } = locate(host.dataset.p); const it = arr[i];
+  const v = e.target.value;
+  if (f === 'type') it.type = v;
+  else if (f === 'count') it.count = Math.max(1, Math.min(99, parseInt(v) || 1));
+  else if (f === 'speed') { const n = parseFloat(String(v).replace(',', '.')); it.speed = isNaN(n) ? it.speed : Math.min(limits.spdMax, Math.max(limits.spdMin, Math.round(n * 10) / 10)); }
+  else if (f === 'incline') it.incline = parseFloat(v);
+  else if (f === 'value') {
+    const n = it.mode === 'time' ? parseTime(v) : Math.round(parseFloat(String(v).replace(',', '.')));
+    if (n > 0) it.value = n; else toast('Neplatná hodnota');
+  }
+  changed();
+});
+$('steps').addEventListener('click', e => {
+  const b = e.target.closest('button[data-a]'); if (!b) return;
+  const host = b.closest('[data-p]'); const { arr, i } = locate(host.dataset.p); const a = b.dataset.a;
+  if (a === 'up' && i > 0) [arr[i - 1], arr[i]] = [arr[i], arr[i - 1]];
+  else if (a === 'down' && i < arr.length - 1) [arr[i + 1], arr[i]] = [arr[i], arr[i + 1]];
+  else if (a === 'dup') arr.splice(i + 1, 0, JSON.parse(JSON.stringify(arr[i])));
+  else if (a === 'del') arr.splice(i, 1);
+  else if (a === 'addIn') arr[i].steps.push(newStep('run'));
+  else if (a === 'mode') {
+    const s = arr[i], m = b.dataset.v; if (s.mode === m) return;
+    s.value = m === 'dist' ? Math.max(10, Math.round(stepMeters(s) / 10) * 10) : Math.max(10, Math.round(stepSeconds(s) / 5) * 5);
+    s.mode = m;
+  } else return;
+  changed();
+});
+$('addStep').onclick = () => { const st = W().steps; st.push(newStep(st.length ? 'run' : 'warmup')); changed(); };
+$('addRepeat').onclick = () => { W().steps.push({ kind:'repeat', count:4, steps:[newStep('run'), newStep('rest')] }); changed(); };
+$('wSel').onchange = e => { curW = +e.target.value; changed(); };
+$('wName').onchange = e => { W().name = e.target.value.trim() || 'Bez názvu'; changed(); };
+$('wNew').onclick = () => { workouts.push({ id:uid(), name:'Nový trénink', steps:[newStep('warmup')] }); curW = workouts.length - 1; changed(); };
+$('wCopy').onclick = () => { const c = JSON.parse(JSON.stringify(W())); c.id = uid(); c.name += ' (kopie)'; workouts.push(c); curW = workouts.length - 1; changed(); };
+armDouble($('wDel'), 'Opravdu smazat?', () => {
+  workouts.splice(curW, 1); if (!workouts.length) workouts.push(sampleWorkout());
+  curW = Math.max(0, curW - 1); changed();
+});
+$('goRun').onclick = () => showTab('run');
+
+// tlačítko s potvrzením druhým klepnutím (alert/confirm nepoužíváme)
+function armDouble(btn, question, action) {
+  const orig = btn.textContent; let armed = false, timer;
+  btn.addEventListener('click', () => {
+    if (!armed) { armed = true; btn.textContent = question; timer = setTimeout(() => { armed = false; btn.textContent = orig; }, 3000); return; }
+    clearTimeout(timer); armed = false; btn.textContent = orig; action();
+  });
+}
+
+// ================= BLUETOOTH =================
+const FTMS = 0x1826, HRS = 0x180D;
+const CH = { feature:0x2ACC, tmData:0x2ACD, ctrl:0x2AD9, status:0x2ADA, spdRange:0x2AD4, incRange:0x2AD5 };
+let tmDev = null, ctrlChar = null, tmConnected = false, userDisconnect = false;
+let hrDev = null;
+const live = { speed:null, incline:null, hr:null, tmHr:null, lastData:0 };
+let lastTmDist = null;
+
+async function btOk() {
+  if (!('bluetooth' in navigator)) { $('btWarn').textContent = 'Prohlížeč nepodporuje Bluetooth – použijte Chrome.'; return false; }
   return true;
 }
 
-// ---- dekódování dat pásu (FTMS Treadmill Data) ----
 function parseTreadmill(dv) {
-  let o = 0; const f = dv.getUint16(o, true); o += 2;
-  const has = b => (f >> b) & 1;
-  if (!has(0)) { setVal('spd','rychlost km/h',(dv.getUint16(o,true)/100).toFixed(2)); o+=2; }
-  if (has(1)) { setVal('avg','prům. rychlost km/h',(dv.getUint16(o,true)/100).toFixed(2)); o+=2; }
-  if (has(2)) { const d = dv.getUint8(o) | (dv.getUint8(o+1)<<8) | (dv.getUint8(o+2)<<16); setVal('dist','vzdálenost m',d); o+=3; }
-  if (has(3)) { setVal('inc','sklon %',(dv.getInt16(o,true)/10).toFixed(1)); o+=2; setVal('ramp','úhel °',(dv.getInt16(o,true)/10).toFixed(1)); o+=2; }
-  if (has(4)) { setVal('elup','stoupání m',(dv.getUint16(o,true)/10).toFixed(1)); o+=2; setVal('eldn','klesání m',(dv.getUint16(o,true)/10).toFixed(1)); o+=2; }
-  if (has(5)) { setVal('pace','tempo (surově)',dv.getUint8(o)); o+=1; }
-  if (has(6)) { setVal('apace','prům. tempo (surově)',dv.getUint8(o)); o+=1; }
-  if (has(7)) { setVal('kcal','kcal celkem',dv.getUint16(o,true)); o+=2; o+=2; o+=1; }
-  if (has(8)) { setVal('tmhr','tep z pásu',dv.getUint8(o)); o+=1; }
-  if (has(9)) { setVal('met','MET',(dv.getUint8(o)/10).toFixed(1)); o+=1; }
-  if (has(10)) { const s = dv.getUint16(o,true); setVal('time','čas',Math.floor(s/60)+':'+String(s%60).padStart(2,'0')); o+=2; }
-  if (has(11)) { setVal('rem','zbývá s',dv.getUint16(o,true)); o+=2; }
-  if (has(12)) { setVal('force','síla',dv.getInt16(o,true)); o+=2; setVal('pwr','výkon W',dv.getInt16(o,true)); o+=2; }
-  return f;
+  let o = 0; const f = dv.getUint16(o, true); o += 2; const has = b => (f >> b) & 1; const r = {};
+  if (!has(0)) { r.speed = dv.getUint16(o, true) / 100; o += 2; }
+  if (has(1)) o += 2;
+  if (has(2)) { r.dist = dv.getUint8(o) | (dv.getUint8(o + 1) << 8) | (dv.getUint8(o + 2) << 16); o += 3; }
+  if (has(3)) { r.incline = dv.getInt16(o, true) / 10; o += 4; }
+  if (has(4)) o += 4;
+  if (has(5)) o += 1;
+  if (has(6)) o += 1;
+  if (has(7)) o += 5;
+  if (has(8)) { r.hr = dv.getUint8(o); o += 1; }
+  return r;
 }
-
 let dataCount = 0;
 function onTmData(e) {
-  const dv = e.target.value;
-  const f = parseTreadmill(dv);
-  if (dataCount++ < 5 || dataCount % 30 === 0) log('Data pásu [flags 0x' + f.toString(16) + ']: ' + hex(dv));
+  const dv = e.target.value; const r = parseTreadmill(dv);
+  if (dataCount++ < 3 || dataCount % 150 === 0) log('Data pásu: ' + hex(dv));
+  if (r.speed != null) live.speed = r.speed;
+  if (r.incline != null) live.incline = r.incline;
+  if (r.hr) live.tmHr = r.hr;
+  live.lastData = Date.now();
+  if (r.dist != null) {
+    if (lastTmDist == null) lastTmDist = r.dist;
+    let delta = r.dist - lastTmDist;
+    if (delta < 0) delta = r.dist;          // pás si po zastavení vynuloval počítadlo
+    lastTmDist = r.dist;
+    if (run && !run.finished && delta > 0 && delta < 300) run.dist += delta;
+  }
+  if (run && !run.finished) engine.onData();
 }
 
-const RES = {1:'OK',2:'nepodporováno',3:'neplatná hodnota',4:'operace selhala',5:'ovládání nepovoleno'};
-const OPS = {0:'Převzetí ovládání',1:'Reset',2:'Rychlost',3:'Sklon',7:'Start',8:'Stop'};
+// fronta povelů – Bluetooth zvládne jen jednu operaci naráz
+let ctrlQueue = Promise.resolve(), pendingResp = null;
+const RES = { 1:'OK', 2:'nepodporováno', 3:'neplatná hodnota', 4:'selhalo', 5:'ovládání nepovoleno' };
+const OPS = { 0:'Převzetí ovládání', 2:'Rychlost', 3:'Sklon', 7:'Start', 8:'Stop/pauza' };
 function onCtrl(e) {
   const dv = e.target.value;
   if (dv.getUint8(0) === 0x80) {
-    const op = dv.getUint8(1), r = dv.getUint8(2);
-    log('Odpověď pásu: ' + (OPS[op]||op) + ' → ' + (RES[r]||r));
-    $('tmStatus').innerHTML = (OPS[op]||op) + ': <span class="' + (r===1?'ok':'bad') + '">' + (RES[r]||r) + '</span>';
-  } else log('Ovládací bod: ' + hex(dv));
-}
-
-function onStatus(e) { log('Stav pásu: ' + hex(e.target.value)); }
-
-async function readOpt(svc, uuid, name, fn) {
-  try { const c = await svc.getCharacteristic(uuid); const v = await c.readValue(); log(name + ': ' + hex(v)); fn && fn(v); return c; }
-  catch (e) { log(name + ': nedostupné (' + e.message + ')'); return null; }
-}
-
-async function connectTm(all) {
-  if (!(await checkBt())) return;
-  try {
-    const opts = all ? { acceptAllDevices:true, optionalServices:[FTMS, HRS] }
-                     : { filters:[{ services:[FTMS] }], optionalServices:[HRS] };
-    tmDevice = await navigator.bluetooth.requestDevice(opts);
-    $('tmStatus').textContent = 'Připojuji k ' + (tmDevice.name || 'zařízení') + '…';
-    tmDevice.addEventListener('gattserverdisconnected', () => {
-      $('tmStatus').innerHTML = '<span class="bad">Pás odpojen.</span>'; log('Pás odpojen'); setCtl(false);
-    });
-    const svc = await connectWithRetry(tmDevice);
-
-    await readOpt(svc, CH.feature, 'Funkce (Feature)', v => {
-      const tf = v.getUint32(4, true);
-      const sp = tf & 1, ic = (tf >> 1) & 1;
-      $('feat').innerHTML = 'Nastavení rychlosti: ' + (sp?'<span class="ok">podporováno</span>':'<span class="bad">nehlásí</span>') +
-        ' · Nastavení sklonu: ' + (ic?'<span class="ok">podporováno</span>':'<span class="bad">nehlásí</span>');
-    });
-    await readOpt(svc, CH.spdRange, 'Rozsah rychlosti', v => {
-      const mn = v.getUint16(0,true)/100, mx = v.getUint16(2,true)/100, st = v.getUint16(4,true)/100;
-      $('spd').min = mn; $('spd').max = mx; log('  rychlost ' + mn + '–' + mx + ' km/h, krok ' + st);
-    });
-    await readOpt(svc, CH.incRange, 'Rozsah sklonu', v => {
-      const mn = v.getInt16(0,true)/10, mx = v.getInt16(2,true)/10, st = v.getUint16(4,true)/10;
-      $('inc').min = mn; $('inc').max = mx; log('  sklon ' + mn + '–' + mx + ' %, krok ' + st);
-    });
-
-    const data = await svc.getCharacteristic(CH.tmData);
-    data.addEventListener('characteristicvaluechanged', onTmData);
-    await data.startNotifications();
-    log('Odběr dat pásu zapnut');
-
-    try {
-      const st = await svc.getCharacteristic(CH.status);
-      st.addEventListener('characteristicvaluechanged', onStatus);
-      await st.startNotifications();
-    } catch (e) { log('Stav pásu: nedostupný'); }
-
-    try {
-      ctrlChar = await svc.getCharacteristic(CH.ctrl);
-      ctrlChar.addEventListener('characteristicvaluechanged', onCtrl);
-      await ctrlChar.startNotifications();
-      $('btnCtl').disabled = false;
-      log('Ovládací bod nalezen');
-    } catch (e) { log('Ovládací bod nedostupný: ' + e.message); }
-
-    $('tmStatus').innerHTML = '<span class="ok">Připojeno: ' + (tmDevice.name || 'pás') + '</span>';
-    keepAwake();
-  } catch (e) {
-    log('Chyba připojení pásu: ' + e.name + ': ' + e.message);
-    $('tmStatus').innerHTML = '<span class="bad">' + explain(e) + '</span>';
+    const op = dv.getUint8(1), res = dv.getUint8(2);
+    log('Odpověď: ' + (OPS[op] || op) + ' → ' + (RES[res] || res));
+    if (pendingResp && pendingResp.op === op) { pendingResp.resolve(res); pendingResp = null; }
   }
 }
+function onStatus(e) {
+  const dv = e.target.value; const op = dv.getUint8(0);
+  log('Stav pásu: ' + hex(dv));
+  if (run && !run.finished) engine.onStatus(op, dv.byteLength > 1 ? dv.getUint8(1) : 0);
+}
+async function rawCmd(bytes) {
+  if (!ctrlChar || !tmConnected) throw new Error('pás nepřipojen');
+  const p = new Promise(res => { pendingResp = { op:bytes[0], resolve:res }; setTimeout(() => { if (pendingResp && pendingResp.op === bytes[0]) { pendingResp = null; res(-1); } }, 3000); });
+  const buf = new Uint8Array(bytes);
+  if (ctrlChar.writeValueWithResponse) await ctrlChar.writeValueWithResponse(buf); else await ctrlChar.writeValue(buf);
+  return p;
+}
+function cmd(bytes, label) {
+  const job = ctrlQueue.then(async () => {
+    log('Povel: ' + label);
+    try {
+      let r = await rawCmd(bytes);
+      if (r === 5 && bytes[0] !== 0) { await rawCmd([0x00]); r = await rawCmd(bytes); }
+      return r;
+    } catch (e) { log('Chyba povelu: ' + e.message); return -1; }
+  });
+  ctrlQueue = job.catch(() => {});
+  return job;
+}
+const u16 = v => [v & 0xff, (v >> 8) & 0xff];
+const setSpeed = v => cmd([0x02, ...u16(Math.round(v * 100))], 'rychlost ' + v);
+const setIncline = v => cmd([0x03, ...u16(Math.round(v * 10) & 0xffff)], 'sklon ' + v);
 
-const sleep = ms => new Promise(r => setTimeout(r, ms));
-async function connectWithRetry(dev) {
+async function connectGatt(dev) {
   let lastErr;
   for (let i = 1; i <= 5; i++) {
     try {
-      $('tmStatus').textContent = 'Připojuji k ' + (dev.name || 'zařízení') + '… (pokus ' + i + ' z 5)';
-      log('Pokus o připojení ' + i);
+      setPill('Pás: připojuji… (' + i + '/5)', false);
       const server = await dev.gatt.connect();
-      log('GATT připojeno, čekám…');
       await sleep(1000 + i * 500);
-      if (!dev.gatt.connected) throw new Error('spojení spadlo hned po připojení');
+      if (!dev.gatt.connected) throw new Error('spojení spadlo');
       const svc = await server.getPrimaryService(FTMS);
-      log('Připojeno: ' + (dev.name || '?') + ' (pokus ' + i + ')');
-      return svc;
+      try {
+        const v = await (await svc.getCharacteristic(CH.spdRange)).readValue();
+        limits.spdMin = v.getUint16(0, true) / 100; limits.spdMax = v.getUint16(2, true) / 100;
+      } catch (e) {}
+      try {
+        const v = await (await svc.getCharacteristic(CH.incRange)).readValue();
+        limits.incMin = v.getInt16(0, true) / 10; limits.incMax = v.getInt16(2, true) / 10; limits.incStep = (v.getUint16(4, true) / 10) || 0.5;
+      } catch (e) {}
+      store.set('pas.limits', limits);
+      const data = await svc.getCharacteristic(CH.tmData);
+      data.addEventListener('characteristicvaluechanged', onTmData);
+      await data.startNotifications();
+      try { const st = await svc.getCharacteristic(CH.status); st.addEventListener('characteristicvaluechanged', onStatus); await st.startNotifications(); } catch (e) { log('Stav pásu nedostupný'); }
+      ctrlChar = await svc.getCharacteristic(CH.ctrl);
+      ctrlChar.addEventListener('characteristicvaluechanged', onCtrl);
+      await ctrlChar.startNotifications();
+      tmConnected = true; lastTmDist = null;
+      log('Pás připojen (pokus ' + i + ')');
+      setPill('Pás: ' + (dev.name || 'připojen'), true);
+      await cmd([0x00], 'převzetí ovládání');
+      return;
     } catch (e) {
-      lastErr = e;
-      log('Pokus ' + i + ' selhal: ' + e.message);
+      lastErr = e; log('Pokus ' + i + ' selhal: ' + e.message);
       try { if (dev.gatt.connected) dev.gatt.disconnect(); } catch (_) {}
       await sleep(1500);
     }
   }
+  setPill('Pás: nepřipojen', false);
   throw lastErr;
 }
+function setPill(t, on) { $('pillTm').textContent = t; $('pillTm').classList.toggle('on', on); }
 
-function explain(e) {
-  if (e.name === 'NotFoundError') return 'Výběr zrušen nebo zařízení nenalezeno.';
-  if (e.name === 'SecurityError') return 'Stránka nemá povolený Bluetooth (omezení prostředí, kde běží).';
-  if (e.name === 'NotAllowedError') return 'Přístup k Bluetooth zamítnut.';
-  return e.message;
+async function onTmDisconnect() {
+  tmConnected = false; ctrlChar = null;
+  log('Pás odpojen');
+  setPill('Pás: odpojen', false);
+  if (userDisconnect) { userDisconnect = false; return; }
+  if (run && !run.finished) engine.banner('Spojení s pásem se přerušilo, připojuji znovu…');
+  for (let k = 0; k < 10 && !tmConnected; k++) {
+    try { await connectGatt(tmDev); } catch (e) { await sleep(3000); }
+  }
+  if (run && !run.finished) engine.banner(tmConnected ? '' : 'Pás se nepodařilo znovu připojit. Klepněte nahoře na „Pás“.');
+  if (tmConnected && run && !run.finished && !run.paused) engine.applyTargets();
 }
 
-function setCtl(on) { ['btnStart','btnStop','btnSpd','btnInc'].forEach(id => $(id).disabled = !on); }
-
-async function send(bytes, label) {
-  if (!ctrlChar) return;
+$('pillTm').onclick = async () => {
+  if (!(await btOk())) return;
+  if (tmConnected) { toast('Pás je připojený'); return; }
   try {
-    log('Posílám: ' + label + ' [' + bytes.map(b => b.toString(16).padStart(2,'0')).join(' ') + ']');
-    const buf = new Uint8Array(bytes);
-    if (ctrlChar.writeValueWithResponse) await ctrlChar.writeValueWithResponse(buf); else await ctrlChar.writeValue(buf);
-  } catch (e) { log('Chyba zápisu: ' + e.message); }
+    if (!tmDev) {
+      tmDev = await navigator.bluetooth.requestDevice({ filters:[{ services:[FTMS] }], optionalServices:[HRS] });
+      tmDev.addEventListener('gattserverdisconnected', onTmDisconnect);
+    }
+    await connectGatt(tmDev);
+    renderEditor();
+  } catch (e) { log('Připojení pásu: ' + e.name + ' ' + e.message); if (e.name !== 'NotFoundError') toast('Pás se nepodařilo připojit'); }
+};
+
+$('pillHr').onclick = async () => {
+  if (!(await btOk())) return;
+  try {
+    if (!hrDev) {
+      hrDev = await navigator.bluetooth.requestDevice({ filters:[{ services:[HRS] }] });
+      hrDev.addEventListener('gattserverdisconnected', async () => {
+        $('pillHr').textContent = 'Hodinky: odpojeny'; $('pillHr').classList.remove('on'); live.hr = null; log('Hodinky odpojeny');
+        for (let k = 0; k < 5; k++) { await sleep(3000); try { await connectHr(); return; } catch (e) {} }
+      });
+    }
+    await connectHr();
+  } catch (e) { log('Hodinky: ' + e.name + ' ' + e.message); if (e.name !== 'NotFoundError') toast('Hodinky se nepodařilo připojit – je zapnuté Broadcast HR?'); }
+};
+async function connectHr() {
+  const svc = await (await hrDev.gatt.connect()).getPrimaryService(HRS);
+  const ch = await svc.getCharacteristic(0x2A37);
+  ch.addEventListener('characteristicvaluechanged', e => {
+    const dv = e.target.value; const f = dv.getUint8(0);
+    live.hr = (f & 1) ? dv.getUint16(1, true) : dv.getUint8(1);
+  });
+  await ch.startNotifications();
+  $('pillHr').textContent = 'Hodinky: ' + (hrDev.name || 'připojeny'); $('pillHr').classList.add('on');
+  log('Hodinky připojeny');
 }
-const u16 = v => [v & 0xff, (v >> 8) & 0xff];
 
-$('btnTm').onclick = () => connectTm(false);
-$('btnTmAll').onclick = () => connectTm(true);
-$('btnCtl').onclick = async () => { await send([0x00], 'Převzetí ovládání'); setCtl(true); };
-$('btnStart').onclick = () => send([0x07], 'Start');
-$('btnStop').onclick = () => send([0x08, 0x01], 'Stop');
-$('btnSpd').onclick = () => {
-  const v = parseFloat($('spd').value);
-  if (!(v > 0) || v > parseFloat($('spd').max)) { log('Neplatná rychlost'); return; }
-  send([0x02, ...u16(Math.round(v * 100))], 'Rychlost ' + v + ' km/h');
-};
-$('btnInc').onclick = () => {
-  const v = parseFloat($('inc').value);
-  if (isNaN(v) || v < parseFloat($('inc').min) || v > parseFloat($('inc').max)) { log('Neplatný sklon'); return; }
-  send([0x03, ...u16(Math.round(v * 10) & 0xffff)], 'Sklon ' + v + ' %');
-};
+// ================= BĚH (řízení podle tréninku) =================
+let run = null, plan = [], wakeLock = null, tickTimer = null;
 
-// ---- tep z hodinek ----
-$('btnHr').onclick = async () => {
-  if (!(await checkBt())) return;
+function renderRunIdle() {
+  if (run && !run.finished) return;
+  $('runWName').textContent = W().name;
+  $('runWSum').textContent = summary(W());
+  $('runIdle').hidden = false; $('runLive').hidden = true;
+}
+
+let audioCtx = null;
+function beep(freq = 880, ms = 150) {
   try {
-    const dev = await navigator.bluetooth.requestDevice({ filters:[{ services:[HRS] }] });
-    const svc = await (await dev.gatt.connect()).getPrimaryService(HRS);
-    const ch = await svc.getCharacteristic(0x2A37);
-    ch.addEventListener('characteristicvaluechanged', e => {
-      const dv = e.target.value; const f = dv.getUint8(0);
-      setVal('hr', 'tep z hodinek', (f & 1) ? dv.getUint16(1, true) : dv.getUint8(1));
-    });
-    await ch.startNotifications();
-    dev.addEventListener('gattserverdisconnected', () => { $('hrStatus').innerHTML = '<span class="bad">Hodinky odpojeny.</span>'; });
-    $('hrStatus').innerHTML = '<span class="ok">Připojeno: ' + (dev.name || 'hodinky') + '</span>';
-    log('Hodinky připojeny: ' + (dev.name || '?'));
-  } catch (e) {
-    log('Chyba hodinek: ' + e.name + ': ' + e.message);
-    $('hrStatus').innerHTML = '<span class="bad">' + explain(e) + '</span>';
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.frequency.value = freq; o.connect(g); g.connect(audioCtx.destination);
+    g.gain.setValueAtTime(0.25, audioCtx.currentTime);
+    o.start(); o.stop(audioCtx.currentTime + ms / 1000);
+  } catch (e) {}
+  try { navigator.vibrate && navigator.vibrate(ms); } catch (e) {}
+}
+async function keepAwake() { try { if ('wakeLock' in navigator && document.visibilityState === 'visible') wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {} }
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && run && !run.finished) keepAwake(); });
+
+const engine = {
+  async begin() {
+    if (!tmConnected) { toast('Nejdřív připojte pás (nahoře)'); return; }
+    plan = flatten(W());
+    if (!plan.length) { toast('Trénink nemá žádné úseky'); return; }
+    beep(600, 1);   // odemkne zvuk v prohlížeči
+    keepAwake();
+    const cd = $('countdown'); cd.hidden = false;
+    for (let n = 3; n > 0; n--) { cd.textContent = n; beep(660, 120); await sleep(1000); }
+    cd.hidden = true;
+    run = { id:uid(), workout:W().name, plan, startedAt:Date.now(), stepIdx:0, active:0, dist:0,
+            stepStartActive:0, stepStartDist:0, paused:false, pauseReason:'', zeroSince:0, graceUntil:0,
+            samples:[], finished:false, lastTick:Date.now(), lastSample:0, lastBeepSec:-1 };
+    $('runIdle').hidden = true; $('runDone').hidden = true; $('runLive').hidden = false;
+    await this.startBelt();
+    tickTimer = setInterval(() => this.tick(), 250);
+    beep(990, 300);
+  },
+  async startBelt() {
+    run.graceUntil = Date.now() + 8000;
+    await cmd([0x00], 'převzetí ovládání');
+    await cmd([0x07], 'start');
+    // počkat, až se pás rozjede, pak nastavit cíle úseku
+    const t0 = Date.now();
+    while (Date.now() - t0 < 6000 && !(live.speed > 0)) await sleep(200);
+    await this.applyTargets();
+  },
+  async applyTargets() {
+    const s = plan[run.stepIdx]; if (!s) return;
+    await setSpeed(s.speed);
+    await setIncline(s.incline);
+  },
+  tick() {
+    const now = Date.now(), dt = (now - run.lastTick) / 1000; run.lastTick = now;
+    if (!run.paused) run.active += dt;
+    // záznam jednou za sekundu
+    if (now - run.lastSample >= 1000) {
+      run.lastSample = now;
+      run.samples.push([now, live.speed ?? 0, Math.round(run.dist), live.incline ?? 0, live.hr || live.tmHr || 0, run.paused ? 1 : 0, run.stepIdx]);
+      if (run.samples.length % 15 === 0) store.set('pas.current', run);
+    }
+    // automatická pauza, když pás stojí (zastavení na konzoli, bezpečnostní klíč)
+    if (!run.paused && now > run.graceUntil && tmConnected && live.speed === 0) {
+      if (!run.zeroSince) run.zeroSince = now;
+      else if (now - run.zeroSince > 2000) this.setPaused(true, 'belt');
+    } else run.zeroSince = 0;
+    // konec úseku
+    const s = plan[run.stepIdx];
+    if (!run.paused && s) {
+      if (s.mode === 'time') {
+        const left = s.value - (run.active - run.stepStartActive);
+        const ls = Math.ceil(left);
+        if (ls <= 3 && ls >= 1 && ls !== run.lastBeepSec) { run.lastBeepSec = ls; beep(660, 100); }
+        if (left <= 0) this.next();
+      } else if (run.dist - run.stepStartDist >= s.value) this.next();
+    }
+    this.render();
+  },
+  onData() {
+    if (run.paused && run.pauseReason === 'belt' && live.speed > 0) this.setPaused(false, '', true);
+  },
+  onStatus(op, param) {
+    // 0x02 = zastaveno/pauza uživatelem na konzoli, 0x04 = spuštěno na konzoli
+    if (op === 0x02 && !run.paused && Date.now() > run.graceUntil) this.setPaused(true, 'belt');
+  },
+  next() {
+    run.lastBeepSec = -1;
+    if (run.stepIdx >= plan.length - 1) { this.finish(true); return; }
+    run.stepIdx++;
+    run.stepStartActive = run.active; run.stepStartDist = run.dist;
+    beep(990, 350);
+    this.applyTargets();
+  },
+  async setPaused(p, reason, fromBelt) {
+    if (p === run.paused) return;
+    run.paused = p; run.pauseReason = p ? reason : '';
+    $('btnPause').textContent = p ? 'Pokračovat' : 'Pauza';
+    if (p) {
+      log('Pauza (' + reason + ')');
+      if (reason === 'user') { const r = await cmd([0x08, 0x02], 'pauza'); if (r !== 1) await cmd([0x08, 0x01], 'stop'); }
+      this.banner(reason === 'belt' ? 'Pás zastaven – trénink je pozastavený. Pokračujte tlačítkem nebo spuštěním pásu.' : '');
+    } else {
+      log('Pokračuji');
+      this.banner('');
+      if (fromBelt) { run.graceUntil = Date.now() + 5000; await this.applyTargets(); }
+      else await this.startBelt();
+    }
+  },
+  async finish(completed) {
+    if (!run || run.finished) return;
+    run.finished = true; run.completed = completed; run.endedAt = Date.now();
+    clearInterval(tickTimer);
+    await cmd([0x08, 0x01], 'stop');
+    saveRun(run); store.del('pas.current');
+    try { wakeLock && wakeLock.release(); } catch (e) {}
+    beep(990, 600);
+    $('runLive').hidden = true; $('runDone').hidden = false;
+    $('doneSum').innerHTML = '<b>' + escapeHtml(run.workout) + '</b><br>Čas ' + fmtTime(run.active) + ' · ' + fmtKm(run.dist) + ' km' + (completed ? '' : ' (ukončeno předčasně)');
+    this.banner('');
+    setTimeout(() => { $('runIdle').hidden = false; }, 100);
+  },
+  banner(t) { $('runBanner').innerHTML = t ? '<div class="banner">' + escapeHtml(t) + '</div>' : ''; },
+  render() {
+    const s = plan[run.stepIdx]; if (!s) return;
+    $('lvStep').textContent = TYPES[s.type] + (s.rep ? ' ' + s.rep : '');
+    $('lvIdx').textContent = 'úsek ' + (run.stepIdx + 1) + ' z ' + plan.length;
+    let frac;
+    if (s.mode === 'time') { const done = run.active - run.stepStartActive; $('lvRemain').textContent = fmtTime(s.value - done); frac = done / s.value; }
+    else { const done = run.dist - run.stepStartDist; $('lvRemain').textContent = fmtDist(Math.max(0, s.value - done)); frac = done / s.value; }
+    $('lvBar').style.width = Math.min(100, frac * 100) + '%';
+    $('lvTarget').textContent = 'Cíl: ' + fmtNum(s.speed) + ' km/h (' + pace(s.speed) + ' /km) · sklon ' + fmtNum(s.incline) + ' %';
+    $('mSpd').textContent = fmtNum(live.speed);
+    $('mInc').textContent = fmtNum(live.incline);
+    $('mHr').textContent = live.hr || live.tmHr || '–';
+    $('mPace').textContent = pace(live.speed);
+    $('mTime').textContent = fmtTime(run.active);
+    $('mDist').textContent = fmtKm(run.dist);
+    const n = plan[run.stepIdx + 1];
+    $('lvNext').textContent = n ? 'Další: ' + TYPES[n.type] + ' · ' + (n.mode === 'time' ? fmtTime(n.value) : fmtDist(n.value)) + ' · ' + fmtNum(n.speed) + ' km/h · ' + fmtNum(n.incline) + ' %' : 'Poslední úsek';
   }
 };
+$('btnBegin').onclick = () => engine.begin();
+$('btnPause').onclick = () => run && !run.finished && engine.setPaused(!run.paused, 'user');
+$('btnSkip').onclick = () => run && !run.finished && engine.next();
+armDouble($('btnEnd'), 'Opravdu ukončit?', () => run && !run.finished && engine.finish(false));
+
+// ================= ZÁZNAMY =================
+function runsIndex() { return store.get('pas.runs', []); }
+function saveRun(r) {
+  const idx = runsIndex();
+  const meta = { id:r.id, workout:r.workout, startedAt:r.startedAt, active:Math.round(r.active), dist:Math.round(r.dist), completed:!!r.completed };
+  if (!store.set('pas.run.' + r.id, { meta, samples:r.samples })) return;
+  store.set('pas.runs', [meta, ...idx.filter(m => m.id !== r.id)]);
+}
+// záchrana nedokončeného běhu (např. po zavření prohlížeče)
+(function recover() {
+  const cur = store.get('pas.current', null);
+  if (cur && cur.samples && cur.samples.length > 10) { cur.completed = false; saveRun(cur); log('Obnoven nedokončený záznam'); }
+  store.del('pas.current');
+})();
+
+function renderRuns() {
+  const idx = runsIndex();
+  if (!idx.length) { $('runsList').innerHTML = '<div class="muted" style="margin-top:8px">Zatím žádné záznamy.</div>'; return; }
+  $('runsList').innerHTML = idx.map(m =>
+    '<div class="run-item" data-id="' + m.id + '"><div class="grow"><b>' + new Date(m.startedAt).toLocaleString('cs-CZ', { day:'numeric', month:'numeric', hour:'2-digit', minute:'2-digit' }) + '</b> · ' + escapeHtml(m.workout) +
+    '<div class="muted">' + fmtTime(m.active) + ' · ' + fmtKm(m.dist) + ' km' + (m.completed ? '' : ' · nedokončeno') + '</div></div>' +
+    '<button class="ghost" data-a="csv">CSV</button><button class="ghost" data-a="del">Smazat</button></div>').join('');
+  document.querySelectorAll('#runsList .run-item').forEach(el => {
+    const id = el.dataset.id;
+    el.querySelector('[data-a=csv]').onclick = () => downloadCsv(id);
+    armDouble(el.querySelector('[data-a=del]'), 'Opravdu?', () => {
+      store.del('pas.run.' + id); store.set('pas.runs', runsIndex().filter(m => m.id !== id)); renderRuns();
+    });
+  });
+}
+function downloadCsv(id) {
+  const r = store.get('pas.run.' + id, null); if (!r) { toast('Záznam nenalezen'); return; }
+  const lines = ['cas;rychlost_kmh;vzdalenost_m;sklon_pct;tep;pauza;usek'];
+  r.samples.forEach(s => lines.push([new Date(s[0]).toISOString(), String(s[1]).replace('.', ','), s[2], String(s[3]).replace('.', ','), s[4], s[5], s[6] + 1].join(';')));
+  const blob = new Blob(['﻿' + lines.join('\n')], { type:'text/csv' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = 'pas-' + new Date(r.meta.startedAt).toISOString().slice(0, 16).replace(/[T:]/g, '-') + '.csv';
+  document.body.appendChild(a); a.click(); a.remove();
+}
 
 $('btnCopy').onclick = async () => {
-  try { await navigator.clipboard.writeText(logLines.join('\n')); log('Záznam zkopírován'); }
-  catch (e) { log('Kopírování se nepovedlo – označte text ručně.'); }
+  try { await navigator.clipboard.writeText(logLines.join('\n')); toast('Zkopírováno'); } catch (e) { toast('Kopírování se nepovedlo'); }
 };
 
-async function keepAwake() {
-  try { if ('wakeLock' in navigator) { wakeLock = await navigator.wakeLock.request('screen'); } } catch (e) {}
-}
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && tmDevice) keepAwake(); });
-
-checkBt();
-log('Stránka připravena');
+// ---------------- start ----------------
+limits = Object.assign(limits, store.get('pas.limits', {}));
+btOk();
+renderEditor();
+log('Aplikace připravena');
 </script>
 </body>
 </html>
