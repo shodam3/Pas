@@ -166,6 +166,14 @@
       <div id="fixOut"></div>
     </div>
     <div class="card">
+      <h2>Ukládání na GitHub</h2>
+      <div class="muted">Záznamy z pásu a tréninky se ukládají do vašeho soukromého repozitáře. Klíč zůstává jen v tomto telefonu.</div>
+      <div class="row"><input id="ghRepo" class="grow" placeholder="repozitář, např. pas-data"></div>
+      <div class="row"><input id="ghToken" class="grow" type="password" placeholder="přístupový klíč (github_pat_…)" autocomplete="off"></div>
+      <div class="row"><button id="ghSave">Uložit a ověřit</button><button class="ghost" id="ghSync">Odeslat neodeslané</button><button class="ghost" id="ghRestore">Načíst tréninky z GitHubu</button></div>
+      <div id="ghStatus" class="muted"></div>
+    </div>
+    <div class="card">
       <h2>Uložené záznamy z pásu</h2>
       <div class="muted">Záznamy jsou uložené jen v tomto prohlížeči.</div>
       <div id="runsList"></div>
@@ -268,7 +276,11 @@ let workouts = store.get('pas.workouts', null);
 if (!Array.isArray(workouts) || !workouts.length) workouts = [sampleWorkout()];
 let curW = Math.min(store.get('pas.curW', 0), workouts.length - 1);
 const W = () => workouts[curW];
-function saveWorkouts() { store.set('pas.workouts', workouts); store.set('pas.curW', curW); }
+let wBackupTimer = null;
+function saveWorkouts() {
+  store.set('pas.workouts', workouts); store.set('pas.curW', curW);
+  clearTimeout(wBackupTimer); wBackupTimer = setTimeout(() => gh.backupWorkouts(), 5000);
+}
 
 function flatten(w) {
   const out = [];
@@ -773,6 +785,7 @@ const engine = {
     if (run.free && run.waiting) { this.banner(''); $('runLive').hidden = true; $('runIdle').hidden = false; run = null; return; }
     if (!run.free) await cmd([0x08, 0x01], 'stop');
     saveRun(run); store.del('pas.current');
+    gh.syncRuns();
     try { wakeLock && wakeLock.release(); } catch (e) {}
     beep(990, 600);
     $('runLive').hidden = true; $('runDone').hidden = false;
@@ -839,7 +852,7 @@ function renderRuns() {
   if (!idx.length) { $('runsList').innerHTML = '<div class="muted" style="margin-top:8px">Zatím žádné záznamy.</div>'; return; }
   $('runsList').innerHTML = idx.map(m =>
     '<div class="run-item" data-id="' + m.id + '"><div class="grow"><b>' + new Date(m.startedAt).toLocaleString('cs-CZ', { day:'numeric', month:'numeric', hour:'2-digit', minute:'2-digit' }) + '</b> · ' + escapeHtml(m.workout) +
-    '<div class="muted">' + fmtTime(m.active) + ' · ' + fmtKm(m.dist) + ' km' + (m.completed ? '' : ' · nedokončeno') + '</div></div>' +
+    '<div class="muted">' + fmtTime(m.active) + ' · ' + fmtKm(m.dist) + ' km' + (m.completed ? '' : ' · nedokončeno') + (gh.ready() ? (m.uploaded ? ' · ☁ na GitHubu' : ' · neodesláno') : '') + '</div></div>' +
     '<button class="ghost" data-a="csv">CSV</button><button class="ghost" data-a="del">Smazat</button></div>').join('');
   document.querySelectorAll('#runsList .run-item').forEach(el => {
     const id = el.dataset.id;
@@ -858,6 +871,91 @@ function downloadCsv(id) {
   a.download = 'pas-' + new Date(r.meta.startedAt).toISOString().slice(0, 16).replace(/[T:]/g, '-') + '.csv';
   document.body.appendChild(a); a.click(); a.remove();
 }
+
+// ---------- ukládání na GitHub ----------
+const b64enc = str => { const b = new TextEncoder().encode(str); let s = ''; for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000)); return btoa(s); };
+const b64dec = s => new TextDecoder().decode(Uint8Array.from(atob(s.replace(/\s/g, '')), c => c.charCodeAt(0)));
+const gh = {
+  cfg() { return store.get('pas.gh', {}); },
+  ready() { const c = this.cfg(); return !!(c.token && c.owner && c.repo); },
+  busy:false,
+  async api(path, opt = {}) {
+    const c = this.cfg();
+    const r = await fetch('https://api.github.com' + path, { ...opt, cache:'no-store', headers:{ Authorization:'Bearer ' + c.token, Accept:'application/vnd.github+json', 'X-GitHub-Api-Version':'2022-11-28' } });
+    if (r.status === 404) return null;
+    if (r.status === 401) throw new Error('Přístupový klíč je neplatný nebo vypršel.');
+    if (r.status === 403) throw new Error('Klíč nemá oprávnění zapisovat do repozitáře (potřebuje Contents: Read and write).');
+    if (!r.ok) { const t = await r.text(); throw new Error('GitHub ' + r.status + ': ' + t.slice(0, 160)); }
+    return r.json();
+  },
+  path(p) { const c = this.cfg(); return '/repos/' + c.owner + '/' + c.repo + '/contents/' + p.split('/').map(encodeURIComponent).join('/'); },
+  async put(p, text, message) {
+    const cur = await this.api(this.path(p));
+    const body = { message, content:b64enc(text) }; if (cur && cur.sha) body.sha = cur.sha;
+    return this.api(this.path(p), { method:'PUT', body:JSON.stringify(body) });
+  },
+  async get(p) { const r = await this.api(this.path(p)); return r && r.content != null ? b64dec(r.content) : null; },
+  status(t, cls) { $('ghStatus').innerHTML = '<span class="' + (cls || '') + '">' + escapeHtml(t) + '</span>'; },
+  async verify() {
+    const c = this.cfg();
+    const u = await this.api('/user'); if (!u) throw new Error('Klíč nefunguje');
+    c.owner = u.login; store.set('pas.gh', c);
+    const r = await this.api('/repos/' + c.owner + '/' + c.repo);
+    if (!r) throw new Error('Repozitář ' + c.owner + '/' + c.repo + ' nenalezen, nebo k němu klíč nemá přístup');
+    if (!r.private) throw new Error('Repozitář ' + r.full_name + ' je veřejný! Záznamy by viděl kdokoli. Nastavte ho jako soukromý.');
+    return r.full_name;
+  },
+  runPath(m) {
+    const d = new Date(m.startedAt), p2 = n => String(n).padStart(2, '0');
+    return 'zaznamy/' + d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()) + '-' + p2(d.getHours()) + p2(d.getMinutes()) + '-' + m.id + '.json';
+  },
+  async syncRuns() {
+    if (!this.ready() || this.busy) return;
+    this.busy = true; let ok = 0, fail = 0;
+    try {
+      for (const m of runsIndex().filter(m => !m.uploaded)) {
+        const r = store.get('pas.run.' + m.id, null); if (!r) continue;
+        try {
+          await this.put(this.runPath(m), JSON.stringify({ format:'pas-zaznam-1', meta:m,
+            sloupce:['cas_ms', 'rychlost_kmh', 'vzdalenost_m', 'sklon_pct', 'tep', 'pauza', 'usek'], samples:r.samples }), 'Záznam ' + new Date(m.startedAt).toLocaleString('cs-CZ') + ' · ' + m.workout);
+          store.set('pas.runs', runsIndex().map(x => x.id === m.id ? { ...x, uploaded:true } : x)); ok++;
+        } catch (e) { fail++; log('GitHub – záznam ' + m.id + ': ' + e.message); }
+      }
+    } finally { this.busy = false; }
+    if (ok || fail) { this.status(fail ? 'Odesláno ' + ok + ', nepodařilo se ' + fail + ' (zkusím to znovu později).' : 'Odesláno záznamů: ' + ok, fail ? 'bad' : 'ok'); if (!$('tab-runs').hidden) renderRuns(); }
+  },
+  async backupWorkouts() {
+    if (!this.ready()) return;
+    try { await this.put('treninky.json', JSON.stringify({ format:'pas-treninky-1', workouts }, null, 1), 'Záloha tréninků'); log('Tréninky zálohovány na GitHub'); }
+    catch (e) { log('GitHub – záloha tréninků: ' + e.message); }
+  }
+};
+(function initGh() {
+  const c = gh.cfg(); $('ghRepo').value = c.repo || 'pas-data'; $('ghToken').value = c.token ? '••••••••' : '';
+  if (gh.ready()) gh.status('Připojeno k ' + c.owner + '/' + c.repo, 'ok');
+})();
+$('ghSave').onclick = async () => {
+  const c = gh.cfg(); const t = $('ghToken').value.trim();
+  if (t && !t.startsWith('••')) c.token = t;
+  c.repo = $('ghRepo').value.trim().replace(/^.*\//, '') || 'pas-data';
+  store.set('pas.gh', c);
+  if (!c.token) { gh.status('Vložte přístupový klíč.', 'bad'); return; }
+  gh.status('Ověřuji…');
+  try { const name = await gh.verify(); $('ghToken').value = '••••••••'; gh.status('Připojeno k ' + name + '. Odesílám záznamy…', 'ok'); await gh.backupWorkouts(); await gh.syncRuns(); renderRuns(); }
+  catch (e) { gh.status(e.message, 'bad'); }
+};
+$('ghSync').onclick = () => { if (!gh.ready()) { gh.status('Nejdřív nastavte repozitář a klíč.', 'bad'); return; } gh.status('Odesílám…'); gh.syncRuns().then(() => { if (!runsIndex().some(m => !m.uploaded)) gh.status('Vše je odesláno.', 'ok'); }); };
+armDouble($('ghRestore'), 'Opravdu přepsat tréninky?', async () => {
+  if (!gh.ready()) { gh.status('Nejdřív nastavte repozitář a klíč.', 'bad'); return; }
+  try {
+    const t = await gh.get('treninky.json'); if (!t) { gh.status('Na GitHubu zatím žádná záloha tréninků není.', 'bad'); return; }
+    const d = JSON.parse(t); if (!Array.isArray(d.workouts) || !d.workouts.length) throw new Error('Záloha je prázdná');
+    workouts = d.workouts; curW = 0; store.set('pas.workouts', workouts); store.set('pas.curW', 0); renderEditor();
+    gh.status('Načteno tréninků: ' + workouts.length, 'ok');
+  } catch (e) { gh.status('Načtení selhalo: ' + e.message, 'bad'); }
+});
+window.addEventListener('online', () => gh.syncRuns());
+setTimeout(() => gh.syncRuns(), 3000);
 
 // ---------- oprava souboru FIT z hodinek ----------
 let fitBytes = null, fitInfo = null;
