@@ -290,6 +290,15 @@ function merge(watchBytes, samples, opts = {}) {
     }
   }
 
+  // součet časů okruhů srovnat s časem celého běhu (hodinky měří i zlomky sekund)
+  const S0 = msgs.find(m => m.def.global === MSG.session);
+  if (S0 && newLaps.length) {
+    const sumT = newLaps.reduce((a, L) => a + (getField(L, 8) || 0), 0), sumE = newLaps.reduce((a, L) => a + (getField(L, 7) || 0), 0);
+    const L = newLaps[newLaps.length - 1], dT = (getField(S0, 8) || sumT) - sumT, dE = (getField(S0, 7) || sumE) - sumE;
+    if (Math.abs(dT) < 5000) { setField(L, 8, getField(L, 8) + dT); const t = getField(L, 8) / 1000; setField(L, 13, t ? (getField(L, 9) / 100) / t * 1000 : 0); }
+    if (Math.abs(dE) < 5000) setField(L, 7, getField(L, 7) + dE);
+  }
+
   // 5) souhrn běhu
   const totalD = pts[pts.length - 1].d;
   msgs.filter(m => m.def.global === MSG.session).forEach(S => {
