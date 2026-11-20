@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zkouška pásu Domyos</title>
+<style>
+  :root { --bg:#f6f7f9; --fg:#1d2330; --muted:#667085; --card:#fff; --line:#e3e6eb; --acc:#0b6bcb; --ok:#127a3e; --bad:#b42318; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#14171c; --fg:#e8eaef; --muted:#98a2b3; --card:#1d2128; --line:#2c323c; --acc:#4b9cf0; --ok:#4cc27a; --bad:#f2786c; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--fg); }
+  main { max-width:640px; margin:0 auto; padding:16px; }
+  h1 { font-size:1.3rem; margin:4px 0 12px; }
+  h2 { font-size:1rem; margin:0 0 10px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; margin-bottom:12px; }
+  button { font:inherit; padding:10px 14px; border-radius:10px; border:1px solid var(--acc); background:var(--acc); color:#fff; cursor:pointer; margin:3px 4px 3px 0; }
+  button.sec { background:transparent; color:var(--acc); }
+  button.stop { background:var(--bad); border-color:var(--bad); }
+  button:disabled { opacity:.4; cursor:default; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(130px,1fr)); gap:8px; }
+  .val { border:1px solid var(--line); border-radius:10px; padding:8px; }
+  .val b { display:block; font-size:1.35rem; }
+  .val span { font-size:.8rem; color:var(--muted); }
+  .row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:6px 0; }
+  input[type=number] { font:inherit; width:90px; padding:8px; border-radius:8px; border:1px solid var(--line); background:var(--bg); color:var(--fg); }
+  .status { font-size:.9rem; color:var(--muted); }
+  .ok { color:var(--ok); } .bad { color:var(--bad); }
+  #log { font-family:ui-monospace,Consolas,monospace; font-size:.75rem; white-space:pre-wrap; max-height:260px; overflow:auto; background:var(--bg); border-radius:8px; padding:8px; }
+  .warn { border-left:4px solid var(--bad); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Zkouška pásu Domyos Run 500</h1>
+
+  <div class="card warn" id="nobt" hidden>
+    <b>Bluetooth není v tomto prohlížeči nebo na této stránce dostupný.</b>
+    <div class="status" id="nobtWhy"></div>
+  </div>
+
+  <div class="card">
+    <h2>1. Připojení</h2>
+    <button id="btnTm">Připojit pás</button>
+    <button id="btnTmAll" class="sec">Pás se nenašel? Zobrazit všechna zařízení</button>
+    <div class="status" id="tmStatus">Pás nepřipojen.</div>
+    <div style="height:8px"></div>
+    <button id="btnHr" class="sec">Připojit hodinky (tep) – volitelné</button>
+    <div class="status" id="hrStatus">Na hodinkách nejdřív zapněte Broadcast HR.</div>
+  </div>
+
+  <div class="card">
+    <h2>2. Co pás posílá</h2>
+    <div class="grid" id="vals"></div>
+    <div class="status" id="feat" style="margin-top:8px"></div>
+  </div>
+
+  <div class="card">
+    <h2>3. Zkouška ovládání</h2>
+    <div class="status">Postavte se na boční lišty nebo mějte bezpečnostní klíč po ruce. Začněte nízkou rychlostí.</div>
+    <div class="row">
+      <button id="btnCtl" disabled>Převzít ovládání</button>
+      <button id="btnStart" disabled>Start</button>
+      <button id="btnStop" class="stop" disabled>Stop</button>
+    </div>
+    <div class="row">
+      Rychlost <input type="number" id="spd" value="3" step="0.1" min="0.5" max="20"> km/h
+      <button id="btnSpd" disabled>Nastavit</button>
+    </div>
+    <div class="row">
+      Sklon <input type="number" id="inc" value="1" step="0.5" min="0" max="10"> %
+      <button id="btnInc" disabled>Nastavit</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>4. Záznam komunikace</h2>
+    <div class="status">Pokud něco nefunguje, zkopírujte mi tento záznam.</div>
+    <button id="btnCopy" class="sec">Zkopírovat záznam</button>
+    <div id="log"></div>
+  </div>
+</main>
+
+<script>
+const FTMS = 0x1826, HRS = 0x180D;
+const CH = { feature:0x2ACC, tmData:0x2ACD, ctrl:0x2AD9, status:0x2ADA, spdRange:0x2AD4, incRange:0x2AD5, trainStatus:0x2AD3 };
+const $ = id => document.getElementById(id);
+let ctrlChar = null, tmDevice = null, wakeLock = null;
+let logLines = [];
+
+function log(msg) {
+  const t = new Date().toLocaleTimeString('cs-CZ');
+  logLines.push(t + '  ' + msg);
+  if (logLines.length > 400) logLines.shift();
+  $('log').textContent = logLines.slice().reverse().join('\n');
+}
+const hex = dv => Array.from(new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength)).map(b => b.toString(16).padStart(2,'0')).join(' ');
+
+// ---- zobrazení hodnot ----
+const shown = {};
+function setVal(key, label, value) {
+  if (!shown[key]) {
+    const d = document.createElement('div'); d.className = 'val';
+    d.innerHTML = '<b></b><span></span>'; $('vals').appendChild(d); shown[key] = d;
+  }
+  shown[key].querySelector('b').textContent = value;
+  shown[key].querySelector('span').textContent = label;
+}
+
+// ---- kontrola dostupnosti ----
+async function checkBt() {
+  if (!('bluetooth' in navigator)) {
+    $('nobt').hidden = false;
+    $('nobtWhy').textContent = 'Prohlížeč nepodporuje Web Bluetooth. Použijte Chrome na Androidu nebo počítači.';
+    return false;
+  }
+  try {
+    if (navigator.bluetooth.getAvailability && !(await navigator.bluetooth.getAvailability())) {
+      $('nobt').hidden = false;
+      $('nobtWhy').textContent = 'Bluetooth je vypnutý, nebo ho stránka nesmí použít.';
+    }
+  } catch (e) {}
+  return true;
+}
+
+// ---- dekódování dat pásu (FTMS Treadmill Data) ----
+function parseTreadmill(dv) {
+  let o = 0; const f = dv.getUint16(o, true); o += 2;
+  const has = b => (f >> b) & 1;
+  if (!has(0)) { setVal('spd','rychlost km/h',(dv.getUint16(o,true)/100).toFixed(2)); o+=2; }
+  if (has(1)) { setVal('avg','prům. rychlost km/h',(dv.getUint16(o,true)/100).toFixed(2)); o+=2; }
+  if (has(2)) { const d = dv.getUint8(o) | (dv.getUint8(o+1)<<8) | (dv.getUint8(o+2)<<16); setVal('dist','vzdálenost m',d); o+=3; }
+  if (has(3)) { setVal('inc','sklon %',(dv.getInt16(o,true)/10).toFixed(1)); o+=2; setVal('ramp','úhel °',(dv.getInt16(o,true)/10).toFixed(1)); o+=2; }
+  if (has(4)) { setVal('elup','stoupání m',(dv.getUint16(o,true)/10).toFixed(1)); o+=2; setVal('eldn','klesání m',(dv.getUint16(o,true)/10).toFixed(1)); o+=2; }
+  if (has(5)) { setVal('pace','tempo (surově)',dv.getUint8(o)); o+=1; }
+  if (has(6)) { setVal('apace','prům. tempo (surově)',dv.getUint8(o)); o+=1; }
+  if (has(7)) { setVal('kcal','kcal celkem',dv.getUint16(o,true)); o+=2; o+=2; o+=1; }
+  if (has(8)) { setVal('tmhr','tep z pásu',dv.getUint8(o)); o+=1; }
+  if (has(9)) { setVal('met','MET',(dv.getUint8(o)/10).toFixed(1)); o+=1; }
+  if (has(10)) { const s = dv.getUint16(o,true); setVal('time','čas',Math.floor(s/60)+':'+String(s%60).padStart(2,'0')); o+=2; }
+  if (has(11)) { setVal('rem','zbývá s',dv.getUint16(o,true)); o+=2; }
+  if (has(12)) { setVal('force','síla',dv.getInt16(o,true)); o+=2; setVal('pwr','výkon W',dv.getInt16(o,true)); o+=2; }
+  return f;
+}
+
+let dataCount = 0;
+function onTmData(e) {
+  const dv = e.target.value;
+  const f = parseTreadmill(dv);
+  if (dataCount++ < 5 || dataCount % 30 === 0) log('Data pásu [flags 0x' + f.toString(16) + ']: ' + hex(dv));
+}
+
+const RES = {1:'OK',2:'nepodporováno',3:'neplatná hodnota',4:'operace selhala',5:'ovládání nepovoleno'};
+const OPS = {0:'Převzetí ovládání',1:'Reset',2:'Rychlost',3:'Sklon',7:'Start',8:'Stop'};
+function onCtrl(e) {
+  const dv = e.target.value;
+  if (dv.getUint8(0) === 0x80) {
+    const op = dv.getUint8(1), r = dv.getUint8(2);
+    log('Odpověď pásu: ' + (OPS[op]||op) + ' → ' + (RES[r]||r));
+    $('tmStatus').innerHTML = (OPS[op]||op) + ': <span class="' + (r===1?'ok':'bad') + '">' + (RES[r]||r) + '</span>';
+  } else log('Ovládací bod: ' + hex(dv));
+}
+
+function onStatus(e) { log('Stav pásu: ' + hex(e.target.value)); }
+
+async function readOpt(svc, uuid, name, fn) {
+  try { const c = await svc.getCharacteristic(uuid); const v = await c.readValue(); log(name + ': ' + hex(v)); fn && fn(v); return c; }
+  catch (e) { log(name + ': nedostupné (' + e.message + ')'); return null; }
+}
+
+async function connectTm(all) {
+  if (!(await checkBt())) return;
+  try {
+    const opts = all ? { acceptAllDevices:true, optionalServices:[FTMS, HRS] }
+                     : { filters:[{ services:[FTMS] }], optionalServices:[HRS] };
+    tmDevice = await navigator.bluetooth.requestDevice(opts);
+    $('tmStatus').textContent = 'Připojuji k ' + (tmDevice.name || 'zařízení') + '…';
+    tmDevice.addEventListener('gattserverdisconnected', () => {
+      $('tmStatus').innerHTML = '<span class="bad">Pás odpojen.</span>'; log('Pás odpojen'); setCtl(false);
+    });
+    const server = await tmDevice.gatt.connect();
+    log('Připojeno: ' + (tmDevice.name || '?'));
+    const svc = await server.getPrimaryService(FTMS);
+
+    await readOpt(svc, CH.feature, 'Funkce (Feature)', v => {
+      const tf = v.getUint32(4, true);
+      const sp = tf & 1, ic = (tf >> 1) & 1;
+      $('feat').innerHTML = 'Nastavení rychlosti: ' + (sp?'<span class="ok">podporováno</span>':'<span class="bad">nehlásí</span>') +
+        ' · Nastavení sklonu: ' + (ic?'<span class="ok">podporováno</span>':'<span class="bad">nehlásí</span>');
+    });
+    await readOpt(svc, CH.spdRange, 'Rozsah rychlosti', v => {
+      const mn = v.getUint16(0,true)/100, mx = v.getUint16(2,true)/100, st = v.getUint16(4,true)/100;
+      $('spd').min = mn; $('spd').max = mx; log('  rychlost ' + mn + '–' + mx + ' km/h, krok ' + st);
+    });
+    await readOpt(svc, CH.incRange, 'Rozsah sklonu', v => {
+      const mn = v.getInt16(0,true)/10, mx = v.getInt16(2,true)/10, st = v.getUint16(4,true)/10;
+      $('inc').min = mn; $('inc').max = mx; log('  sklon ' + mn + '–' + mx + ' %, krok ' + st);
+    });
+
+    const data = await svc.getCharacteristic(CH.tmData);
+    data.addEventListener('characteristicvaluechanged', onTmData);
+    await data.startNotifications();
+    log('Odběr dat pásu zapnut');
+
+    try {
+      const st = await svc.getCharacteristic(CH.status);
+      st.addEventListener('characteristicvaluechanged', onStatus);
+      await st.startNotifications();
+    } catch (e) { log('Stav pásu: nedostupný'); }
+
+    try {
+      ctrlChar = await svc.getCharacteristic(CH.ctrl);
+      ctrlChar.addEventListener('characteristicvaluechanged', onCtrl);
+      await ctrlChar.startNotifications();
+      $('btnCtl').disabled = false;
+      log('Ovládací bod nalezen');
+    } catch (e) { log('Ovládací bod nedostupný: ' + e.message); }
+
+    $('tmStatus').innerHTML = '<span class="ok">Připojeno: ' + (tmDevice.name || 'pás') + '</span>';
+    keepAwake();
+  } catch (e) {
+    log('Chyba připojení pásu: ' + e.name + ': ' + e.message);
+    $('tmStatus').innerHTML = '<span class="bad">' + explain(e) + '</span>';
+  }
+}
+
+function explain(e) {
+  if (e.name === 'NotFoundError') return 'Výběr zrušen nebo zařízení nenalezeno.';
+  if (e.name === 'SecurityError') return 'Stránka nemá povolený Bluetooth (omezení prostředí, kde běží).';
+  if (e.name === 'NotAllowedError') return 'Přístup k Bluetooth zamítnut.';
+  return e.message;
+}
+
+function setCtl(on) { ['btnStart','btnStop','btnSpd','btnInc'].forEach(id => $(id).disabled = !on); }
+
+async function send(bytes, label) {
+  if (!ctrlChar) return;
+  try {
+    log('Posílám: ' + label + ' [' + bytes.map(b => b.toString(16).padStart(2,'0')).join(' ') + ']');
+    const buf = new Uint8Array(bytes);
+    if (ctrlChar.writeValueWithResponse) await ctrlChar.writeValueWithResponse(buf); else await ctrlChar.writeValue(buf);
+  } catch (e) { log('Chyba zápisu: ' + e.message); }
+}
+const u16 = v => [v & 0xff, (v >> 8) & 0xff];
+
+$('btnTm').onclick = () => connectTm(false);
+$('btnTmAll').onclick = () => connectTm(true);
+$('btnCtl').onclick = async () => { await send([0x00], 'Převzetí ovládání'); setCtl(true); };
+$('btnStart').onclick = () => send([0x07], 'Start');
+$('btnStop').onclick = () => send([0x08, 0x01], 'Stop');
+$('btnSpd').onclick = () => {
+  const v = parseFloat($('spd').value);
+  if (!(v > 0) || v > parseFloat($('spd').max)) { log('Neplatná rychlost'); return; }
+  send([0x02, ...u16(Math.round(v * 100))], 'Rychlost ' + v + ' km/h');
+};
+$('btnInc').onclick = () => {
+  const v = parseFloat($('inc').value);
+  if (isNaN(v) || v < parseFloat($('inc').min) || v > parseFloat($('inc').max)) { log('Neplatný sklon'); return; }
+  send([0x03, ...u16(Math.round(v * 10) & 0xffff)], 'Sklon ' + v + ' %');
+};
+
+// ---- tep z hodinek ----
+$('btnHr').onclick = async () => {
+  if (!(await checkBt())) return;
+  try {
+    const dev = await navigator.bluetooth.requestDevice({ filters:[{ services:[HRS] }] });
+    const svc = await (await dev.gatt.connect()).getPrimaryService(HRS);
+    const ch = await svc.getCharacteristic(0x2A37);
+    ch.addEventListener('characteristicvaluechanged', e => {
+      const dv = e.target.value; const f = dv.getUint8(0);
+      setVal('hr', 'tep z hodinek', (f & 1) ? dv.getUint16(1, true) : dv.getUint8(1));
+    });
+    await ch.startNotifications();
+    dev.addEventListener('gattserverdisconnected', () => { $('hrStatus').innerHTML = '<span class="bad">Hodinky odpojeny.</span>'; });
+    $('hrStatus').innerHTML = '<span class="ok">Připojeno: ' + (dev.name || 'hodinky') + '</span>';
+    log('Hodinky připojeny: ' + (dev.name || '?'));
+  } catch (e) {
+    log('Chyba hodinek: ' + e.name + ': ' + e.message);
+    $('hrStatus').innerHTML = '<span class="bad">' + explain(e) + '</span>';
+  }
+};
+
+$('btnCopy').onclick = async () => {
+  try { await navigator.clipboard.writeText(logLines.join('\n')); log('Záznam zkopírován'); }
+  catch (e) { log('Kopírování se nepovedlo – označte text ručně.'); }
+};
+
+async function keepAwake() {
+  try { if ('wakeLock' in navigator) { wakeLock = await navigator.wakeLock.request('screen'); } } catch (e) {}
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && tmDevice) keepAwake(); });
+
+checkBt();
+log('Stránka připravena');
+</script>
+</body>
+</html>
