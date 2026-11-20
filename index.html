@@ -138,8 +138,14 @@
   <!-- ================= ZÁZNAMY ================= -->
   <section id="tab-runs" hidden>
     <div class="card">
-      <h2>Uložené záznamy</h2>
-      <div class="muted">Záznamy jsou uložené jen v tomto prohlížeči. Opravu záznamu z hodinek doplním v dalším kroku.</div>
+      <h2>Oprava záznamu z hodinek</h2>
+      <div class="muted">V aplikaci COROS otevřete běh → export ve formátu FIT → uložit do telefonu. Pak ho tady vyberte. Aplikace sama najde odpovídající záznam z pásu.</div>
+      <div class="row"><button id="btnPickFit">Vybrat soubor FIT</button><input type="file" id="fitIn" accept=".fit,application/octet-stream,*/*" hidden></div>
+      <div id="fixOut"></div>
+    </div>
+    <div class="card">
+      <h2>Uložené záznamy z pásu</h2>
+      <div class="muted">Záznamy jsou uložené jen v tomto prohlížeči.</div>
       <div id="runsList"></div>
     </div>
   </section>
@@ -162,6 +168,7 @@
 </nav>
 <div id="countdown" hidden></div>
 
+<script src="fit.js"></script>
 <script>
 'use strict';
 const $ = id => document.getElementById(id);
@@ -713,6 +720,59 @@ function downloadCsv(id) {
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
   a.download = 'pas-' + new Date(r.meta.startedAt).toISOString().slice(0, 16).replace(/[T:]/g, '-') + '.csv';
   document.body.appendChild(a); a.click(); a.remove();
+}
+
+// ---------- oprava souboru FIT z hodinek ----------
+let fitBytes = null, fitInfo = null;
+$('btnPickFit').onclick = () => $('fitIn').click();
+$('fitIn').onchange = async e => {
+  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+  try {
+    fitBytes = new Uint8Array(await f.arrayBuffer());
+    fitInfo = FIT.summary(fitBytes);
+  } catch (err) { $('fixOut').innerHTML = '<p class="bad">Soubor se nepodařilo přečíst: ' + escapeHtml(err.message) + '</p>'; return; }
+  log('FIT z hodinek: ' + fitInfo.start.toISOString() + ' – ' + fitInfo.end.toISOString());
+  const ws = fitInfo.start.getTime(), we = fitInfo.end.getTime();
+  const cands = runsIndex().map(m => {
+    const r = store.get('pas.run.' + m.id, null); if (!r || !r.samples.length) return null;
+    const a = r.samples[0][0], b = r.samples[r.samples.length - 1][0];
+    return { m, overlap:Math.min(b, we) - Math.max(a, ws) };
+  }).filter(Boolean).sort((x, y) => y.overlap - x.overlap);
+  const fmt = d => d.toLocaleString('cs-CZ', { day:'numeric', month:'numeric', hour:'2-digit', minute:'2-digit' });
+  let h = '<p>Běh z hodinek: <b>' + fmt(fitInfo.start) + '</b>, ' + fmtTime((we - ws) / 1000) + (fitInfo.distance != null ? ', ' + fmtKm(fitInfo.distance) + ' km podle hodinek' : '') + '</p>';
+  if (!cands.length) { $('fixOut').innerHTML = h + '<p class="bad">Nemáte uložený žádný záznam z pásu.</p>'; return; }
+  const best = cands[0].overlap > 60000 ? cands[0].m.id : '';
+  h += '<div class="row"><select id="fixRun" class="grow">' + cands.map(c =>
+    '<option value="' + c.m.id + '"' + (c.m.id === best ? ' selected' : '') + '>' + fmt(new Date(c.m.startedAt)) + ' · ' + escapeHtml(c.m.workout) + ' · ' + fmtKm(c.m.dist) + ' km' + (c.overlap > 60000 ? ' ✓ časově sedí' : '') + '</option>').join('') + '</select></div>';
+  if (!best) h += '<p class="bad">Žádný záznam z pásu se časově nepřekrývá s během z hodinek. Vyberte ho ručně, nebo zkontrolujte, že jde o správný soubor.</p>';
+  h += '<div class="row"><label><input type="checkbox" id="fixKm"> okruhy po 1 km místo úseků tréninku</label></div>';
+  h += '<button id="btnFix">Opravit a stáhnout</button><div id="fixRes"></div>';
+  $('fixOut').innerHTML = h;
+  $('btnFix').onclick = doFix;
+};
+function doFix() {
+  const id = $('fixRun').value; const r = store.get('pas.run.' + id, null);
+  if (!r) { toast('Záznam nenalezen'); return; }
+  try {
+    const res = FIT.merge(fitBytes, r.samples, { laps:$('fixKm').checked ? 'km' : 'steps' });
+    log('Oprava: posun hodin ' + res.offset + ' s, shoda tepu ' + JSON.stringify(res.hrMatch));
+    const st = fitInfo.start, pad = n => String(n).padStart(2, '0');
+    const name = 'pas-' + st.getFullYear() + '-' + pad(st.getMonth() + 1) + '-' + pad(st.getDate()) + '-' + pad(st.getHours()) + pad(st.getMinutes()) + '.fit';
+    const blob = new Blob([res.bytes], { type:'application/octet-stream' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    const warn = [];
+    if (!res.hrMatch) warn.push('Časy hodinek a pásu se nepodařilo sladit podle tepu (byly hodinky připojené k aplikaci?). Použil jsem čas bez korekce.');
+    else if (res.hrMatch.error > 5) warn.push('Tep v obou záznamech se dost liší – zkontrolujte, že jde o stejný běh.');
+    if (!res.stats.covered) warn.push('Záznam z pásu nepokrývá celý běh z hodinek – mimo něj je rychlost 0.');
+    $('fixRes').innerHTML = '<p class="ok">Hotovo, soubor <b>' + name + '</b> je ve stažených souborech.</p>' +
+      '<p>Vzdálenost ' + fmtKm(res.stats.distance) + ' km · převýšení ' + Math.round(res.stats.ascent) + ' m · ' + res.stats.laps + ' okruhů · posun hodin ' + res.offset + ' s</p>' +
+      warn.map(w => '<p class="bad">' + escapeHtml(w) + '</p>').join('') +
+      '<p class="muted">Dál: na <a href="https://t.coros.com" target="_blank" rel="noopener">t.coros.com</a> → Activity List → Import Data nahrajte tento soubor a v aplikaci COROS smažte původní běh.</p>';
+  } catch (err) {
+    log('Chyba opravy: ' + err.stack);
+    $('fixRes').innerHTML = '<p class="bad">Oprava selhala: ' + escapeHtml(err.message) + '</p>';
+  }
 }
 
 $('btnCopy').onclick = async () => {
