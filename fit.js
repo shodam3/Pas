@@ -32,7 +32,7 @@ function decode(input) {
   if (String.fromCharCode(b[8], b[9], b[10], b[11]) !== '.FIT') throw new Error('Soubor není ve formátu FIT');
   const dataSize = dv.getUint32(4, true);
   const out = { protocol:b[1], profile:dv.getUint16(2, true), messages:[] };
-  const locals = {};
+  const locals = {}, pendingDef = {};
   let p = hsize, end = hsize + dataSize, lastTs = 0;
   while (p < end) {
     const h = b[p++];
@@ -41,7 +41,7 @@ function decode(input) {
       const def = locals[local]; if (!def) throw new Error('Chybí definice');
       let ts = (lastTs & ~0x1F) + off; if (off < (lastTs & 0x1F)) ts += 0x20; lastTs = ts;
       const raw = b.slice(p, p + def.len); p += def.len;
-      out.messages.push({ def, raw, cts:ts });
+      out.messages.push({ def, raw, cts:ts, local, emitDef:!!pendingDef[local] }); pendingDef[local] = false;
       continue;
     }
     const local = h & 0x0F;
@@ -53,11 +53,11 @@ function decode(input) {
       for (let i = 0; i < n; i++) { fields.push({ num:b[p], size:b[p + 1], type:b[p + 2], off }); off += b[p + 1]; p += 3; }
       const devFields = [];
       if (h & 0x20) { const nd = b[p++]; for (let i = 0; i < nd; i++) { devFields.push({ num:b[p], size:b[p + 1], dev:b[p + 2], off }); off += b[p + 1]; p += 3; } }
-      locals[local] = { global, arch, fields, devFields, len:off };
+      locals[local] = { global, arch, fields, devFields, len:off }; pendingDef[local] = true;
     } else {
       const def = locals[local]; if (!def) throw new Error('Chybí definice');
       const raw = b.slice(p, p + def.len); p += def.len;
-      const m = { def, raw };
+      const m = { def, raw, local, emitDef:!!pendingDef[local] }; pendingDef[local] = false;
       const tsv = getField(m, 253); if (tsv != null) lastTs = tsv;
       out.messages.push(m);
     }
@@ -112,7 +112,8 @@ function ensureField(m, num, size, type) {
 function cloneMsg(m) { return { def:m.def, raw:m.raw.slice() }; }
 
 // ---------- zápis ----------
-function encode(fit) {
+function encode(fit, opts = {}) {
+  if (opts.preserve) return encodePreserve(fit);
   const chunks = []; let len = 0;
   const push = a => { chunks.push(a); len += a.length; };
   const bound = new Array(16).fill(null); let next = 0;
@@ -146,10 +147,41 @@ function encode(fit) {
   return out;
 }
 
+// zápis se stejnými lokálními čísly a definicemi na stejných místech jako originál
+function defBytes(d, local) {
+  const le = d.arch === 0, hasDev = d.devFields.length > 0;
+  const a = new Uint8Array(6 + d.fields.length * 3 + (hasDev ? 1 + d.devFields.length * 3 : 0));
+  a[0] = 0x40 | (hasDev ? 0x20 : 0) | local; a[1] = 0; a[2] = d.arch;
+  new DataView(a.buffer).setUint16(3, d.global, le);
+  a[5] = d.fields.length; let q = 6;
+  d.fields.forEach(f => { a[q++] = f.num; a[q++] = f.size; a[q++] = f.type; });
+  if (hasDev) { a[q++] = d.devFields.length; d.devFields.forEach(f => { a[q++] = f.num; a[q++] = f.size; a[q++] = f.dev; }); }
+  return a;
+}
+function encodePreserve(fit) {
+  const chunks = []; let len = 0; const bound = {};
+  const push = a => { chunks.push(a); len += a.length; };
+  for (const m of fit.messages) {
+    const local = m.local;
+    if (m.emitDef || bound[local] !== m.def) { push(defBytes(m.def, local)); bound[local] = m.def; }
+    if (m.cts != null && !fieldOf(m.def, 253)) {
+      const a = new Uint8Array(1 + m.raw.length); a[0] = 0x80 | ((local & 3) << 5) | (m.cts & 0x1F); a.set(m.raw, 1); push(a);
+    } else { const a = new Uint8Array(1 + m.raw.length); a[0] = local; a.set(m.raw, 1); push(a); }
+  }
+  const out = new Uint8Array(14 + len + 2), dv = new DataView(out.buffer);
+  out[0] = 14; out[1] = fit.protocol || 0x20; dv.setUint16(2, fit.profile || 2132, true); dv.setUint32(4, len, true);
+  out.set([0x2E, 0x46, 0x49, 0x54], 8);
+  dv.setUint16(12, crc16(out, 0, 0, 12), true);
+  let p = 14; for (const c of chunks) { out.set(c, p); p += c.length; }
+  dv.setUint16(p, crc16(out, 0, 0, p), true);
+  return out;
+}
+
 // ---------- sloučení ----------
 // samples: [[ms, rychlost km/h, vzdálenost m, sklon %, tep, pauza 0/1, index úseku], ...]
 function merge(watchBytes, samples, opts = {}) {
   const fit = decode(watchBytes);
+  const P = !!opts.preserve;   // zachovat přesně strukturu originálu (jen změnit hodnoty)
   const msgs = fit.messages;
   const recs = msgs.filter(m => m.def.global === MSG.record);
   if (recs.length < 10) throw new Error('Soubor z hodinek neobsahuje záznam běhu');
@@ -188,9 +220,9 @@ function merge(watchBytes, samples, opts = {}) {
     let d = Math.max(prevD, x.dist - base);
     alt += (d - prevD) * (x.inc / 100);
     if (d > prevD) ascent += Math.max(0, (d - prevD) * x.inc / 100);
-    ensureField(m, 6, 2, 0x84); ensureField(m, 2, 2, 0x84); ensureField(m, 9, 2, 0x83);
+    if (!P) { ensureField(m, 6, 2, 0x84); ensureField(m, 2, 2, 0x84); ensureField(m, 9, 2, 0x83); }
     setField(m, 5, d * 100);
-    setField(m, 9, x.inc * 100);   // sklon v % × 100
+    setField(m, 9, x.inc * 100);   // sklon v % × 100 (jen pokud pole existuje)
     setField(m, 6, x.speed / 3.6 * 1000);
     setField(m, 2, (alt + 500) * 5);
     pts.push({ t, d, v:x.speed / 3.6, hr:getField(m, 3), cad:getField(m, 4), step:x.step, alt, inc:x.inc, dt:Math.max(0, t - prevT) });
@@ -214,7 +246,7 @@ function merge(watchBytes, samples, opts = {}) {
   const oldLaps = msgs.filter(m => m.def.global === MSG.lap);
   const tEnd = pts[pts.length - 1].t;
   const bounds = [t0];
-  const useSteps = opts.laps !== 'km' && samples.some(s => s[6] > 0);
+  const useSteps = !P && opts.laps !== 'km' && samples.some(s => s[6] > 0);
   if (useSteps) {
     for (let i = 1; i < samples.length; i++) if (samples[i][6] !== samples[i - 1][6]) { const t = Math.round(T[i]); if (t > bounds[bounds.length - 1] + 5 && t < tEnd - 5) bounds.push(t); }
   } else {
@@ -233,9 +265,10 @@ function merge(watchBytes, samples, opts = {}) {
       const hrs = all.map(p => p.hr).filter(Boolean), cads = all.map(p => p.cad).filter(Boolean);
       const strides = seg.reduce((s, p) => s + (p.cad || 0) / 60 * p.dt, 0);
       let up = 0, down = 0; for (let j = 1; j < all.length; j++) { const dd = all[j].alt - all[j - 1].alt; if (dd > 0) up += dd; else down -= dd; }
-      const L = cloneMsg(oldLaps[Math.min(i, oldLaps.length - 1)]);
+      const src = oldLaps[Math.min(i, oldLaps.length - 1)];
+      const L = P && i < oldLaps.length ? src : { ...cloneMsg(src), local:src.local, emitDef:false };
       const inner0 = pts.filter(p => p.t >= a && p.t < b);
-      ensureField(L, 45, 2, 0x83); ensureField(L, 48, 2, 0x83);
+      if (!P) { ensureField(L, 45, 2, 0x83); ensureField(L, 48, 2, 0x83); }
       setField(L, 45, avgGrade(all) * 100); setField(L, 48, Math.max(0, ...(inner0.length ? inner0 : all).map(p => p.inc)) * 100);
       setField(L, 254, newLaps.length); setField(L, 253, b - FIT_EPOCH); setField(L, 2, a - FIT_EPOCH);
       setField(L, 7, elapsed * 1000); setField(L, 8, timer * 1000); setField(L, 9, dist * 100);
@@ -257,7 +290,7 @@ function merge(watchBytes, samples, opts = {}) {
     setField(S, 14, timer ? totalD / timer * 1000 : 0);
     setField(S, 15, Math.max(...pts.map(p => p.v)) * 1000);
     setField(S, 22, ascent); setField(S, 23, 0);
-    ensureField(S, 52, 2, 0x83); ensureField(S, 55, 2, 0x83);
+    if (!P) { ensureField(S, 52, 2, 0x83); ensureField(S, 55, 2, 0x83); }
     setField(S, 52, avgGrade(pts) * 100); setField(S, 55, Math.max(0, ...pts.map(p => p.inc)) * 100);
     const cyc = getField(S, 10); if (cyc) setField(S, 134, totalD / cyc / 2 * 10000);   // mm × 10
   });
@@ -267,10 +300,11 @@ function merge(watchBytes, samples, opts = {}) {
     const first = msgs.indexOf(oldLaps[0]);
     const rest = msgs.filter(m => m.def.global !== MSG.lap);
     const before = msgs.slice(0, first).filter(m => m.def.global !== MSG.lap).length;
+    if (P && newLaps.length) newLaps[0].emitDef = oldLaps[0].emitDef;
     rest.splice(before, 0, ...newLaps);
     fit.messages = rest;
   }
-  const bytes = encode(fit);
+  const bytes = encode(fit, { preserve:P });
   return {
     bytes, offset, hrMatch:bestN ? { error:bestErr, points:bestN } : null,
     stats:{ distance:totalD, ascent, laps:newLaps.length, start:new Date(t0 * 1000), end:new Date(tEnd * 1000),
