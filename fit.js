@@ -188,12 +188,20 @@ function merge(watchBytes, samples, opts = {}) {
     let d = Math.max(prevD, x.dist - base);
     alt += (d - prevD) * (x.inc / 100);
     if (d > prevD) ascent += Math.max(0, (d - prevD) * x.inc / 100);
-    ensureField(m, 6, 2, 0x84); ensureField(m, 2, 2, 0x84);
+    ensureField(m, 6, 2, 0x84); ensureField(m, 2, 2, 0x84); ensureField(m, 9, 2, 0x83);
     setField(m, 5, d * 100);
+    setField(m, 9, x.inc * 100);   // sklon v % × 100
     setField(m, 6, x.speed / 3.6 * 1000);
     setField(m, 2, (alt + 500) * 5);
-    pts.push({ t, d, v:x.speed / 3.6, hr:getField(m, 3), cad:getField(m, 4), step:x.step, alt, dt:Math.max(0, t - prevT) });
+    pts.push({ t, d, v:x.speed / 3.6, hr:getField(m, 3), cad:getField(m, 4), step:x.step, alt, inc:x.inc, dt:Math.max(0, t - prevT) });
     prevD = d; prevT = t;
+  }
+
+  // průměrný sklon vážený uběhnutou vzdáleností
+  function avgGrade(list) {
+    let sd = 0, sg = 0;
+    for (let j = 1; j < list.length; j++) { const dd = list[j].d - list[j - 1].d; sd += dd; sg += dd * list[j].inc; }
+    return sd > 0 ? sg / sd : 0;
   }
 
   // pauzy hodinek (timer stop → start)
@@ -226,6 +234,9 @@ function merge(watchBytes, samples, opts = {}) {
       const strides = seg.reduce((s, p) => s + (p.cad || 0) / 60 * p.dt, 0);
       let up = 0, down = 0; for (let j = 1; j < all.length; j++) { const dd = all[j].alt - all[j - 1].alt; if (dd > 0) up += dd; else down -= dd; }
       const L = cloneMsg(oldLaps[Math.min(i, oldLaps.length - 1)]);
+      const inner0 = pts.filter(p => p.t >= a && p.t < b);
+      ensureField(L, 45, 2, 0x83); ensureField(L, 48, 2, 0x83);
+      setField(L, 45, avgGrade(all) * 100); setField(L, 48, Math.max(0, ...(inner0.length ? inner0 : all).map(p => p.inc)) * 100);
       setField(L, 254, newLaps.length); setField(L, 253, b - FIT_EPOCH); setField(L, 2, a - FIT_EPOCH);
       setField(L, 7, elapsed * 1000); setField(L, 8, timer * 1000); setField(L, 9, dist * 100);
       setField(L, 13, timer ? dist / timer * 1000 : 0); const inner = pts.filter(p => p.t >= a && p.t < b);
@@ -246,6 +257,8 @@ function merge(watchBytes, samples, opts = {}) {
     setField(S, 14, timer ? totalD / timer * 1000 : 0);
     setField(S, 15, Math.max(...pts.map(p => p.v)) * 1000);
     setField(S, 22, ascent); setField(S, 23, 0);
+    ensureField(S, 52, 2, 0x83); ensureField(S, 55, 2, 0x83);
+    setField(S, 52, avgGrade(pts) * 100); setField(S, 55, Math.max(0, ...pts.map(p => p.inc)) * 100);
     const cyc = getField(S, 10); if (cyc) setField(S, 134, totalD / cyc / 2 * 10000);   // mm × 10
   });
 
