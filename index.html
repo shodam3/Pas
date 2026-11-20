@@ -745,7 +745,6 @@ $('fitIn').onchange = async e => {
   h += '<div class="row"><select id="fixRun" class="grow">' + cands.map(c =>
     '<option value="' + c.m.id + '"' + (c.m.id === best ? ' selected' : '') + '>' + fmt(new Date(c.m.startedAt)) + ' · ' + escapeHtml(c.m.workout) + ' · ' + fmtKm(c.m.dist) + ' km' + (c.overlap > 60000 ? ' ✓ časově sedí' : '') + '</option>').join('') + '</select></div>';
   if (!best) h += '<p class="bad">Žádný záznam z pásu se časově nepřekrývá s během z hodinek. Vyberte ho ručně, nebo zkontrolujte, že jde o správný soubor.</p>';
-  h += '<div class="row"><label><input type="checkbox" id="fixKm"> okruhy po 1 km místo úseků tréninku</label></div>';
   h += '<button id="btnFix">Opravit a stáhnout</button><div id="fixRes"></div>';
   $('fixOut').innerHTML = h;
   $('btnFix').onclick = doFix;
@@ -754,7 +753,7 @@ function doFix() {
   const id = $('fixRun').value; const r = store.get('pas.run.' + id, null);
   if (!r) { toast('Záznam nenalezen'); return; }
   try {
-    const res = FIT.merge(fitBytes, r.samples, { laps:$('fixKm').checked ? 'km' : 'steps' });
+    const res = FIT.merge(fitBytes, r.samples, { preserve:true });
     log('Oprava: posun hodin ' + res.offset + ' s, shoda tepu ' + JSON.stringify(res.hrMatch));
     const st = fitInfo.start, pad = n => String(n).padStart(2, '0');
     const name = 'pas-' + st.getFullYear() + '-' + pad(st.getMonth() + 1) + '-' + pad(st.getDate()) + '-' + pad(st.getHours()) + pad(st.getMinutes()) + '.fit';
