@@ -179,9 +179,7 @@ async function connectTm(all) {
     tmDevice.addEventListener('gattserverdisconnected', () => {
       $('tmStatus').innerHTML = '<span class="bad">Pás odpojen.</span>'; log('Pás odpojen'); setCtl(false);
     });
-    const server = await tmDevice.gatt.connect();
-    log('Připojeno: ' + (tmDevice.name || '?'));
-    const svc = await server.getPrimaryService(FTMS);
+    const svc = await connectWithRetry(tmDevice);
 
     await readOpt(svc, CH.feature, 'Funkce (Feature)', v => {
       const tf = v.getUint32(4, true);
@@ -223,6 +221,30 @@ async function connectTm(all) {
     log('Chyba připojení pásu: ' + e.name + ': ' + e.message);
     $('tmStatus').innerHTML = '<span class="bad">' + explain(e) + '</span>';
   }
+}
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+async function connectWithRetry(dev) {
+  let lastErr;
+  for (let i = 1; i <= 5; i++) {
+    try {
+      $('tmStatus').textContent = 'Připojuji k ' + (dev.name || 'zařízení') + '… (pokus ' + i + ' z 5)';
+      log('Pokus o připojení ' + i);
+      const server = await dev.gatt.connect();
+      log('GATT připojeno, čekám…');
+      await sleep(1000 + i * 500);
+      if (!dev.gatt.connected) throw new Error('spojení spadlo hned po připojení');
+      const svc = await server.getPrimaryService(FTMS);
+      log('Připojeno: ' + (dev.name || '?') + ' (pokus ' + i + ')');
+      return svc;
+    } catch (e) {
+      lastErr = e;
+      log('Pokus ' + i + ' selhal: ' + e.message);
+      try { if (dev.gatt.connected) dev.gatt.disconnect(); } catch (_) {}
+      await sleep(1500);
+    }
+  }
+  throw lastErr;
 }
 
 function explain(e) {
