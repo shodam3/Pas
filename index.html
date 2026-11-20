@@ -170,7 +170,7 @@
       <div class="muted">Záznamy z pásu a tréninky se ukládají do vašeho soukromého repozitáře. Klíč zůstává jen v tomto telefonu.</div>
       <div class="row"><input id="ghRepo" class="grow" placeholder="repozitář, např. pas-data"></div>
       <div class="row"><input id="ghToken" class="grow" type="password" placeholder="přístupový klíč (github_pat_…)" autocomplete="off"></div>
-      <div class="row"><button id="ghSave">Uložit a ověřit</button><button class="ghost" id="ghSync">Odeslat neodeslané</button><button class="ghost" id="ghRestore">Načíst tréninky z GitHubu</button></div>
+      <div class="row"><button id="ghSave">Uložit a ověřit</button><button class="ghost" id="ghSync">Odeslat neodeslané</button><button class="ghost" id="ghRestore">Načíst tréninky z GitHubu</button><button class="ghost" id="ghRuns">Načíst záznamy z GitHubu</button></div>
       <div id="ghStatus" class="muted"></div>
     </div>
     <div class="card">
@@ -894,6 +894,33 @@ const gh = {
     const body = { message, content:b64enc(text) }; if (cur && cur.sha) body.sha = cur.sha;
     return this.api(this.path(p), { method:'PUT', body:JSON.stringify(body) });
   },
+  async raw(p) {
+    const c = this.cfg();
+    const r = await fetch('https://api.github.com' + this.path(p), { cache:'no-store', headers:{ Authorization:'Bearer ' + c.token, Accept:'application/vnd.github.raw+json', 'X-GitHub-Api-Version':'2022-11-28' } });
+    if (!r.ok) throw new Error('GitHub ' + r.status);
+    return r.text();
+  },
+  async restoreRuns() {
+    const list = await this.api(this.path('zaznamy'));
+    if (!Array.isArray(list) || !list.length) return { added:0, total:0 };
+    const files = list.filter(f => f.type === 'file' && f.name.endsWith('.json'));
+    const have = new Set(runsIndex().map(m => m.id));
+    let added = 0, skipped = 0, full = false;
+    for (const f of files) {
+      const id = f.name.replace(/\.json$/, '').split('-').slice(4).join('-');
+      if (have.has(id)) { skipped++; continue; }
+      try {
+        const d = JSON.parse(await this.raw('zaznamy/' + f.name));
+        if (!d.meta || !Array.isArray(d.samples)) continue;
+        const meta = { ...d.meta, uploaded:true };
+        if (!store.set('pas.run.' + meta.id, { meta, samples:d.samples })) { full = true; break; }
+        const idx = runsIndex().filter(m => m.id !== meta.id); idx.push(meta); idx.sort((a, b) => b.startedAt - a.startedAt);
+        if (!store.set('pas.runs', idx)) { store.del('pas.run.' + meta.id); full = true; break; }
+        have.add(meta.id); added++;
+      } catch (e) { log('GitHub – načtení ' + f.name + ': ' + e.message); }
+    }
+    return { added, total:files.length, skipped, full };
+  },
   async get(p) { const r = await this.api(this.path(p)); return r && r.content != null ? b64dec(r.content) : null; },
   status(t, cls) { $('ghStatus').innerHTML = '<span class="' + (cls || '') + '">' + escapeHtml(t) + '</span>'; },
   async verify() {
@@ -954,6 +981,15 @@ armDouble($('ghRestore'), 'Opravdu přepsat tréninky?', async () => {
     gh.status('Načteno tréninků: ' + workouts.length, 'ok');
   } catch (e) { gh.status('Načtení selhalo: ' + e.message, 'bad'); }
 });
+$('ghRuns').onclick = async () => {
+  if (!gh.ready()) { gh.status('Nejdřív nastavte repozitář a klíč.', 'bad'); return; }
+  gh.status('Načítám záznamy…');
+  try {
+    const r = await gh.restoreRuns();
+    gh.status(r.total ? 'Načteno záznamů: ' + r.added + (r.skipped ? ' (už v aplikaci: ' + r.skipped + ')' : '') + '.' + (r.full ? ' Paměť prohlížeče je plná – smažte v aplikaci starší záznamy a zkuste to znovu.' : '') : 'Na GitHubu žádné záznamy nejsou.', r.full ? 'bad' : 'ok');
+    renderRuns();
+  } catch (e) { gh.status('Načtení selhalo: ' + e.message, 'bad'); }
+};
 window.addEventListener('online', () => gh.syncRuns());
 setTimeout(() => gh.syncRuns(), 3000);
 
