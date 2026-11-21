@@ -327,7 +327,7 @@ function merge(watchBytes, samples, opts = {}) {
 // Hledá posun v rozsahu ±range s. Nejednoznačné = stejně dobře (do +0,5 tepu) sedí posuny
 // rozprostřené přes víc než 6 s – pak má rozhodnout uživatel.
 // HR_WARN: průměrná odchylka tepu (tepy/min), od které se aplikace ptá, zda pokračovat.
-const HR_WARN = 5;
+const HR_WARN = 1;
 const ALIGN_RANGE = 30, ALIGN_MIN_POINTS = 60, ALIGN_TOL = 0.5, ALIGN_SPREAD = 6;
 function alignRecs(recs, samples, range = ALIGN_RANGE) {
   const wHr = new Map(); recs.forEach(m => { const h = getField(m, 3), t = getField(m, 253); if (h && t != null) wHr.set(t + FIT_EPOCH, h); });
