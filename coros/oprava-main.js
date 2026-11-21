@@ -223,38 +223,50 @@
     const res = FIT.merge(origBytes, rec.d.samples, { preserve:true, offset:chosen });
     L('✓ Opraveno: ' + km(res.stats.distance) + ' (hodinky ' + km(act.distance) + '), převýšení ' + Math.round(res.stats.ascent) + ' m, posun hodin ' + res.offset + ' s' + (res.hrMatch ? '' : ' – časy nesladěny podle tepu'), OK);
 
-    // ---------- 6) nahrání do Corosu (po krocích s výpisem) ----------
-    const step = async (label, fn) => {
-      const line = L('… ' + label, MUTED);
-      try { const v = await fn(); line.textContent = '✓ ' + label; line.style.color = OK; return v; }
-      catch (e) {
-        const blocked = e instanceof TypeError || /Failed to fetch|NetworkError|Load failed/i.test(e.message);
-        line.textContent = '✗ ' + label + ': ' + e.message + (blocked ? ' (prohlížeč požadavek zablokoval nebo server neodpověděl)' : ''); line.style.color = BAD;
-        throw new Error('nahrání se zastavilo v kroku „' + label + '“');
-      }
-    };
-    const stsUrl = 'https://faq.coros.com/openapi/oss/sts?bucket=' + (eu ? 'eu-coros' : 'coros-s3') + '&service=aws&v=2&app_id=1660188068672619112&sign=' + (eu ? '877571111A1EE5316E4B590103D4B5B3' : 'E34EF0E34A498A54A9C3EAEFC12B7CAF');
-    const cr = await step('1/3 oprávnění k nahrání (faq.coros.com)', async () => {
-      const r = await fetch(stsUrl); const t = await r.text();
-      let sts; try { sts = JSON.parse(t); } catch (e) { throw new Error('HTTP ' + r.status + ', odpověď není JSON: ' + t.slice(0, 120)); }
-      if (sts.code !== 200 || !sts.data || !sts.data.credentials) throw new Error('HTTP ' + r.status + ', ' + (sts.msg || sts.code));
-      const c = JSON.parse(atob(sts.data.credentials.replace('9y78gpoERW4lBNYL', '')));
-      if (!c.Bucket || !c.Region) throw new Error('neúplná oprávnění');
-      return c;
-    });
-    const fileName = 'pas-' + stamp(as) + '.fit', md5 = md5Hex(res.bytes);
-    const zip = zipStored([{ name:md5 + '/', data:null }, { name:md5 + '/' + fileName, data:res.bytes }]);
-    const object = 'fit_zip/' + user.userId + '/' + md5 + '.zip';
-    await step('2/3 nahrání souboru (' + cr.Bucket + '.s3.' + cr.Region + '.amazonaws.com)', () => s3Put(cr, object, zip));
-    const fd = new FormData();
-    fd.append('jsonParameter', JSON.stringify({ source:1, timezone:(-new Date().getTimezoneOffset() / 60) * 4, bucket:cr.Bucket, md5, size:zip.length, object, serviceName:'aws', oriFileName:fileName }));
-    const ih = { AccessToken:tok }; if (H.yfheader) ih.yfheader = H.yfheader;   // import chce token v hlavičce AccessToken
-    await step('3/3 registrace importu (' + api.replace('https://', '') + ')', async () => {
-      const r = await fetch(api + '/activity/fit/import', { method:'POST', body:fd, headers:ih }); const t = await r.text();
-      let ir; try { ir = JSON.parse(t); } catch (e) { throw new Error('HTTP ' + r.status + ', odpověď není JSON: ' + t.slice(0, 120)); }
-      if (ir.result !== '0000') throw new Error(ir.message + ' (' + ir.result + ')');
-    });
-    const wait = L('… Soubor nahrán, čekám, až ho Coros zpracuje', MUTED);
+    // ---------- 6) nahrání přes dialog Import Data samotného webu Corosu ----------
+    const fileName = 'pas-' + stamp(as) + '.fit';
+    const vis = el => !!(el && (el.offsetWidth || el.offsetHeight || el.getClientRects().length));
+    const fileInput = () => [...document.querySelectorAll('input[type=file]')].find(i => !box.contains(i));
+    const byText = (re, root) => [...(root || document).querySelectorAll('button, a, [role=button], [class*=btn], [class*=button], span, div, li')]
+      .filter(e => !box.contains(e) && vis(e) && re.test((e.textContent || '').trim()) && (e.textContent || '').trim().length <= 30)
+      .sort((a, b) => a.textContent.trim().length - b.textContent.trim().length || b.querySelectorAll('*').length - a.querySelectorAll('*').length)[0];
+    const buttonsList = root => [...(root || document).querySelectorAll('button, [role=button], a')].filter(e => !box.contains(e) && vis(e)).map(e => (e.textContent || '').trim()).filter(t => t && t.length <= 30);
+    // panel stáhnout dolů, ať je stránka vidět a dá se na ni klepat
+    box.style.top = '55%';
+    let inp = fileInput();
+    if (!inp) {
+      const imp = byText(/^(import data|import|importovat( data)?|nahrát( data)?)$/i);
+      if (imp) { imp.click(); L('   klepnuto na „' + imp.textContent.trim() + '“', MUTED); await sleep(2000); inp = fileInput(); }
+    }
+    if (!inp) {
+      const nav = byText(/^(activity list|activities|seznam aktivit|aktivity)$/i);
+      if (nav) { nav.click(); L('   klepnuto na „' + nav.textContent.trim() + '“', MUTED); await sleep(3000);
+        const imp = byText(/^(import data|import|importovat( data)?|nahrát( data)?)$/i);
+        if (imp) { imp.click(); L('   klepnuto na „' + imp.textContent.trim() + '“', MUTED); await sleep(2000); inp = fileInput(); } }
+    }
+    if (!inp) {
+      L('? Dialog importu jsem nenašel sám. Otevřete ho prosím na stránce: Activity List → Import Data. Čekám (až 2 min)…', BAD);
+      L('   tlačítka na stránce: ' + buttonsList().slice(0, 25).join(' | '), MUTED);
+      for (let i = 0; i < 120 && !inp; i++) { await sleep(1000); inp = fileInput(); }
+      if (!inp) { stop('Dialog importu se neotevřel. Originál je zálohovaný na GitHubu.'); return; }
+    }
+    // vložit opravený soubor, jako by ho uživatel vybral
+    try {
+      const dt = new DataTransfer(); dt.items.add(new File([res.bytes], fileName, { type:'application/octet-stream', lastModified:Date.now() }));
+      inp.files = dt.files;
+      inp.dispatchEvent(new Event('input', { bubbles:true })); inp.dispatchEvent(new Event('change', { bubbles:true }));
+      L('✓ Opravený soubor ' + fileName + ' vložen do importu', OK);
+    } catch (e) { stop('Soubor se nepodařilo vložit do importu: ' + e.message); return; }
+    // potvrdit nahrání tlačítkem v dialogu
+    await sleep(1500);
+    const dlg = inp.closest('[role=dialog], [class*=dialog], [class*=modal], [class*=popup], [class*=drawer]') || document;
+    const conf = byText(/^(upload|start upload|import|confirm|ok|submit|nahrát|importovat|potvrdit|odeslat)$/i, dlg);
+    if (conf) { conf.click(); L('   klepnuto na „' + conf.textContent.trim() + '“ v dialogu', MUTED); }
+    else {
+      L('? Potvrzovací tlačítko jsem v dialogu nenašel. Pokud dialog čeká na potvrzení, klepněte na něj prosím sám (Upload).', BAD);
+      L('   tlačítka v dialogu: ' + buttonsList(dlg === document ? null : dlg).slice(0, 15).join(' | '), MUTED);
+    }
+    const wait = L('… Čekám, až Coros soubor zpracuje', MUTED);
     let fixed = null;
     for (let i = 0; i < 36 && !fixed; i++) {
       await sleep(5000);
