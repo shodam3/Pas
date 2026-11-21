@@ -223,19 +223,37 @@
     const res = FIT.merge(origBytes, rec.d.samples, { preserve:true, offset:chosen });
     L('✓ Opraveno: ' + km(res.stats.distance) + ' (hodinky ' + km(act.distance) + '), převýšení ' + Math.round(res.stats.ascent) + ' m, posun hodin ' + res.offset + ' s' + (res.hrMatch ? '' : ' – časy nesladěny podle tepu'), OK);
 
-    // ---------- 6) nahrání do Corosu ----------
-    const sts = await (await fetch('https://faq.coros.com/openapi/oss/sts?bucket=' + (eu ? 'eu-coros' : 'coros-s3') + '&service=aws&v=2&app_id=1660188068672619112&sign=' + (eu ? '877571111A1EE5316E4B590103D4B5B3' : 'E34EF0E34A498A54A9C3EAEFC12B7CAF'))).json();
-    if (sts.code !== 200 || !sts.data || !sts.data.credentials) throw new Error('Coros nevydal oprávnění k nahrání (' + (sts.msg || sts.code) + ')');
-    const cr = JSON.parse(atob(sts.data.credentials.replace('9y78gpoERW4lBNYL', '')));
+    // ---------- 6) nahrání do Corosu (po krocích s výpisem) ----------
+    const step = async (label, fn) => {
+      const line = L('… ' + label, MUTED);
+      try { const v = await fn(); line.textContent = '✓ ' + label; line.style.color = OK; return v; }
+      catch (e) {
+        const blocked = e instanceof TypeError || /Failed to fetch|NetworkError|Load failed/i.test(e.message);
+        line.textContent = '✗ ' + label + ': ' + e.message + (blocked ? ' (prohlížeč požadavek zablokoval nebo server neodpověděl)' : ''); line.style.color = BAD;
+        throw new Error('nahrání se zastavilo v kroku „' + label + '“');
+      }
+    };
+    const stsUrl = 'https://faq.coros.com/openapi/oss/sts?bucket=' + (eu ? 'eu-coros' : 'coros-s3') + '&service=aws&v=2&app_id=1660188068672619112&sign=' + (eu ? '877571111A1EE5316E4B590103D4B5B3' : 'E34EF0E34A498A54A9C3EAEFC12B7CAF');
+    const cr = await step('1/3 oprávnění k nahrání (faq.coros.com)', async () => {
+      const r = await fetch(stsUrl); const t = await r.text();
+      let sts; try { sts = JSON.parse(t); } catch (e) { throw new Error('HTTP ' + r.status + ', odpověď není JSON: ' + t.slice(0, 120)); }
+      if (sts.code !== 200 || !sts.data || !sts.data.credentials) throw new Error('HTTP ' + r.status + ', ' + (sts.msg || sts.code));
+      const c = JSON.parse(atob(sts.data.credentials.replace('9y78gpoERW4lBNYL', '')));
+      if (!c.Bucket || !c.Region) throw new Error('neúplná oprávnění');
+      return c;
+    });
     const fileName = 'pas-' + stamp(as) + '.fit', md5 = md5Hex(res.bytes);
     const zip = zipStored([{ name:md5 + '/', data:null }, { name:md5 + '/' + fileName, data:res.bytes }]);
     const object = 'fit_zip/' + user.userId + '/' + md5 + '.zip';
-    await s3Put(cr, object, zip);
+    await step('2/3 nahrání souboru (' + cr.Bucket + '.s3.' + cr.Region + '.amazonaws.com)', () => s3Put(cr, object, zip));
     const fd = new FormData();
     fd.append('jsonParameter', JSON.stringify({ source:1, timezone:(-new Date().getTimezoneOffset() / 60) * 4, bucket:cr.Bucket, md5, size:zip.length, object, serviceName:'aws', oriFileName:fileName }));
     const ih = { AccessToken:tok }; if (H.yfheader) ih.yfheader = H.yfheader;   // import chce token v hlavičce AccessToken
-    const ir = await (await fetch(api + '/activity/fit/import', { method:'POST', body:fd, headers:ih })).json();
-    if (ir.result !== '0000') throw new Error('Coros import: ' + ir.message + ' (' + ir.result + ')');
+    await step('3/3 registrace importu (' + api.replace('https://', '') + ')', async () => {
+      const r = await fetch(api + '/activity/fit/import', { method:'POST', body:fd, headers:ih }); const t = await r.text();
+      let ir; try { ir = JSON.parse(t); } catch (e) { throw new Error('HTTP ' + r.status + ', odpověď není JSON: ' + t.slice(0, 120)); }
+      if (ir.result !== '0000') throw new Error(ir.message + ' (' + ir.result + ')');
+    });
     const wait = L('… Soubor nahrán, čekám, až ho Coros zpracuje', MUTED);
     let fixed = null;
     for (let i = 0; i < 36 && !fixed; i++) {
