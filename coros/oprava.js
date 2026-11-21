@@ -706,9 +706,12 @@ if (typeof module !== 'undefined' && module.exports) module.exports = api; else 
       inp.dispatchEvent(new Event('input', { bubbles:true })); inp.dispatchEvent(new Event('change', { bubbles:true }));
       L('✓ Opravený soubor ' + fileName + ' vložen do importu', OK);
     } catch (e) { stop('Soubor se nepodařilo vložit do importu: ' + e.message); return; }
-    await sleep(1500);
-    if (!vis(upBtn)) { stop('Tlačítko Upload po vložení souboru zmizelo. Zkontrolujte dialog a případně dokončete ručně.'); return; }
-    upBtn.click(); L('   klepnuto na „Upload“', MUTED);
+    // po vložení může web dialog překreslit – tlačítko Upload hledat znovu
+    let ups2 = [];
+    for (let t = 0; t < 5000; t += 250) { await sleep(250); ups2 = uploads(); if (ups2.length) { await sleep(300); ups2 = uploads(); break; } }
+    if (ups2.length === 1) { ups2[0].click(); L('   klepnuto na „Upload“', MUTED); }
+    else if (!ups2.length) L('   Tlačítko Upload po vložení souboru není vidět – možná nahrávání začalo samo. Pokud dialog čeká na potvrzení, klepněte na Upload sám.', MUTED);
+    else L('? Po vložení souboru vidím ' + ups2.length + ' tlačítka „Upload“, nevím, které je správné. Klepněte prosím na to v dialogu importu sám (panel můžete zmenšit nebo přesunout).', BAD);
     const wait = L('… Čekám, až Coros soubor zpracuje', MUTED);
     const expStart = res.trimmed ? res.trimmed.from : act.startTime;   // začátek opraveného běhu (po zkrácení)
     let fixed = null;
