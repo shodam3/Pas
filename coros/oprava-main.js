@@ -17,6 +17,7 @@
   const OK = '#127a3e', BAD = '#b42318', MUTED = '#667085';
   const L = (t, c) => { const d = document.createElement('div'); d.textContent = t; if (c) d.style.color = c; d.style.whiteSpace = 'pre-wrap'; body.appendChild(d); box.scrollTop = box.scrollHeight; return d; };
   const fmt = ms => new Date(ms).toLocaleString('cs-CZ', { day:'numeric', month:'numeric', year:'numeric', hour:'2-digit', minute:'2-digit' });
+  const fmtS = ms => new Date(ms).toLocaleString('cs-CZ', { day:'numeric', month:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit' });
   const km = m => ((m || 0) / 1000).toFixed(2).replace('.', ',') + ' km';
   const mins = s => Math.floor(s / 60) + ':' + String(Math.round(s % 60)).padStart(2, '0');
   const pace = (m, s) => m > 0 ? mins(s / (m / 1000)) + ' /km' : '–';
@@ -138,6 +139,7 @@
     if (!act) { L('✗ Mezi posledními 20 aktivitami není neopravený běh na pásu.', BAD); return; }
     const as = act.startTime * 1000, ae = act.endTime ? act.endTime * 1000 : as + (act.totalTime || 0) * 1000;
     L('✓ Běh z hodinek: ' + fmt(as) + ' · ' + (act.name || '') + ' · ' + km(act.distance) + ' · ' + mins(act.totalTime || 0), OK);
+    L('   hodinky: ' + fmtS(as) + ' – ' + fmtS(ae), MUTED);
 
     // ---------- 3) GitHub a záznam z pásu ----------
     let ghTok = ls.get('pasGhToken'), ghRepo = ls.get('pasGhRepo') || 'pas-data';
@@ -174,6 +176,7 @@
       const s = d.samples || []; if (!s.length) continue;
       if (d.opraveno) { L('   (záznam ' + f.name + ' už byl použitý ' + fmt(d.opraveno.cas) + ', přeskakuji)', MUTED); continue; }
       const ov = Math.min(s[s.length - 1][0], ae) - Math.max(s[0][0], as);
+      L('   pás: ' + fmtS(s[0][0]) + ' – ' + fmtS(s[s.length - 1][0]) + ' · překryv ' + Math.max(0, Math.round(ov / 1000)) + ' s · ' + f.name, MUTED);
       if (ov > 60000 && (!rec || ov > rec.ov)) rec = { name:f.name, ov, d };
     }
     if (!rec) { L('✗ K tomuto běhu jsem na GitHubu nenašel nepoužitý záznam z pásu (hledal jsem ±3 h).', BAD); return; }
