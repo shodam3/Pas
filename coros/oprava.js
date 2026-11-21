@@ -326,6 +326,8 @@ function merge(watchBytes, samples, opts = {}) {
 // Sladění hodin hodinek a telefonu podle tepu (tep z hodinek je v obou záznamech).
 // Hledá posun v rozsahu ±range s. Nejednoznačné = stejně dobře (do +0,5 tepu) sedí posuny
 // rozprostřené přes víc než 6 s – pak má rozhodnout uživatel.
+// HR_WARN: průměrná odchylka tepu (tepy/min), od které se aplikace ptá, zda pokračovat.
+const HR_WARN = 5;
 const ALIGN_RANGE = 30, ALIGN_MIN_POINTS = 60, ALIGN_TOL = 0.5, ALIGN_SPREAD = 6;
 function alignRecs(recs, samples, range = ALIGN_RANGE) {
   const wHr = new Map(); recs.forEach(m => { const h = getField(m, 3), t = getField(m, 253); if (h && t != null) wHr.set(t + FIT_EPOCH, h); });
@@ -341,7 +343,8 @@ function alignRecs(recs, samples, range = ALIGN_RANGE) {
   for (const t of tried) if (t.err < best.err || (t.err === best.err && Math.abs(t.off) < Math.abs(best.off))) best = t;
   const good = tried.filter(t => t.err <= best.err + ALIGN_TOL).map(t => t.off);
   const lo = Math.min(...good), hi = Math.max(...good);
-  return { offset:best.off, error:best.err, points:best.n, ambiguous:hi - lo > ALIGN_SPREAD, matched:true, from:lo, to:hi, range };
+  return { offset:best.off, error:best.err, points:best.n, ambiguous:hi - lo > ALIGN_SPREAD, matched:true, from:lo, to:hi, range,
+           errorAt:off => { const t = tried.find(x => x.off === off); return t ? t.err : null; } };
 }
 function align(watchBytes, samples) {
   const fit = decode(watchBytes);
@@ -362,7 +365,7 @@ function summary(watchBytes) {
   };
 }
 
-const api = { decode, encode, merge, summary, align, getField, setField, crc16, FIT_EPOCH };
+const api = { HR_WARN, decode, encode, merge, summary, align, getField, setField, crc16, FIT_EPOCH };
 if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.FIT = api;
 })(typeof window !== 'undefined' ? window : globalThis);
 // Pás – oprava běhu v Corosu (krok 2). Spouští se jako záložka na stránce Training Hubu.
@@ -577,9 +580,18 @@ if (typeof module !== 'undefined' && module.exports) module.exports = api; else 
       if (chosen === null) { stop('Oprava zrušena (originál je zálohovaný na GitHubu).'); return; }
       L('   zvolený posun: ' + chosen + ' s', MUTED);
     }
+    const errC = al.matched ? al.errorAt(chosen) : null;
+    if (errC != null && errC > FIT.HR_WARN) {
+      L('? Tep v záznamu z hodinek a z pásu se při posunu ' + chosen + ' s liší v průměru o ' + errC.toFixed(1).replace('.', ',') + ' tepu. Obvykle to znamená, že záznamy nepatří ke stejnému běhu, nebo že hodinky vysílaly tep přerušovaně. Pokračovat?', BAD);
+      const go = await new Promise(res => {
+        const bs = []; const add = (t, v, c) => { const b = button(t, c); bs.push(b); b.onclick = () => { bs.forEach(x => x.remove()); res(v); }; };
+        add('Pokračovat', true); add('Zrušit', false, '#667085');
+      });
+      if (!go) { stop('Oprava zrušena (originál je zálohovaný na GitHubu).'); return; }
+      L('   pokračuji i přes vyšší odchylku tepu', MUTED);
+    }
     const res = FIT.merge(origBytes, rec.d.samples, { preserve:true, offset:chosen });
     L('✓ Opraveno: ' + km(res.stats.distance) + ' (hodinky ' + km(act.distance) + '), převýšení ' + Math.round(res.stats.ascent) + ' m, posun hodin ' + res.offset + ' s' + (res.hrMatch ? '' : ' – časy nesladěny podle tepu'), OK);
-    if (res.hrMatch && res.hrMatch.error > 5) L('   Pozor: tep v obou záznamech se dost liší.', BAD);
 
     // ---------- 6) nahrání do Corosu ----------
     const sts = await (await fetch('https://faq.coros.com/openapi/oss/sts?bucket=' + (eu ? 'eu-coros' : 'coros-s3') + '&service=aws&v=2&app_id=1660188068672619112&sign=' + (eu ? '877571111A1EE5316E4B590103D4B5B3' : 'E34EF0E34A498A54A9C3EAEFC12B7CAF'))).json();

@@ -210,9 +210,18 @@
       if (chosen === null) { stop('Oprava zrušena (originál je zálohovaný na GitHubu).'); return; }
       L('   zvolený posun: ' + chosen + ' s', MUTED);
     }
+    const errC = al.matched ? al.errorAt(chosen) : null;
+    if (errC != null && errC > FIT.HR_WARN) {
+      L('? Tep v záznamu z hodinek a z pásu se při posunu ' + chosen + ' s liší v průměru o ' + errC.toFixed(1).replace('.', ',') + ' tepu. Obvykle to znamená, že záznamy nepatří ke stejnému běhu, nebo že hodinky vysílaly tep přerušovaně. Pokračovat?', BAD);
+      const go = await new Promise(res => {
+        const bs = []; const add = (t, v, c) => { const b = button(t, c); bs.push(b); b.onclick = () => { bs.forEach(x => x.remove()); res(v); }; };
+        add('Pokračovat', true); add('Zrušit', false, '#667085');
+      });
+      if (!go) { stop('Oprava zrušena (originál je zálohovaný na GitHubu).'); return; }
+      L('   pokračuji i přes vyšší odchylku tepu', MUTED);
+    }
     const res = FIT.merge(origBytes, rec.d.samples, { preserve:true, offset:chosen });
     L('✓ Opraveno: ' + km(res.stats.distance) + ' (hodinky ' + km(act.distance) + '), převýšení ' + Math.round(res.stats.ascent) + ' m, posun hodin ' + res.offset + ' s' + (res.hrMatch ? '' : ' – časy nesladěny podle tepu'), OK);
-    if (res.hrMatch && res.hrMatch.error > 5) L('   Pozor: tep v obou záznamech se dost liší.', BAD);
 
     // ---------- 6) nahrání do Corosu ----------
     const sts = await (await fetch('https://faq.coros.com/openapi/oss/sts?bucket=' + (eu ? 'eu-coros' : 'coros-s3') + '&service=aws&v=2&app_id=1660188068672619112&sign=' + (eu ? '877571111A1EE5316E4B590103D4B5B3' : 'E34EF0E34A498A54A9C3EAEFC12B7CAF'))).json();

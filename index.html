@@ -1030,6 +1030,17 @@ $('fitIn').onchange = async e => {
     if (chosen === null) { out(head + '<p class="muted">Oprava zrušena.</p>'); return; }
     log('Sladění nejednoznačné (' + al.from + '…' + al.to + ' s), uživatel zvolil ' + chosen + ' s');
   }
+  // vyšší průměrná odchylka tepu: rozhodne uživatel
+  const errC = al.matched ? al.errorAt(chosen) : null;
+  if (errC != null && errC > FIT.HR_WARN) {
+    const go = await new Promise(res => {
+      out(head + '<p class="bad">Tep v záznamu z hodinek a z pásu se při posunu ' + chosen + ' s liší v průměru o ' + errC.toFixed(1).replace('.', ',') + ' tepu. Obvykle to znamená, že záznamy nepatří ke stejnému běhu, nebo že hodinky vysílaly tep přerušovaně.</p><p>Pokračovat v opravě?</p><div class="row" id="hrBtns"></div>');
+      const add = (t, v, cls) => { const b = document.createElement('button'); b.textContent = t; if (cls) b.className = cls; b.onclick = () => res(v); $('hrBtns').appendChild(b); };
+      add('Pokračovat', true); add('Zrušit', false, 'ghost');
+    });
+    if (!go) { out(head + '<p class="muted">Oprava zrušena.</p>'); return; }
+    log('Vyšší odchylka tepu ' + errC.toFixed(1) + ', uživatel pokračoval');
+  }
   try {
     const res = FIT.merge(fitBytes, c.samples, { preserve:true, offset:chosen });
     log('Oprava: posun hodin ' + res.offset + ' s, shoda tepu ' + JSON.stringify(res.hrMatch));
@@ -1040,7 +1051,6 @@ $('fitIn').onchange = async e => {
     document.body.appendChild(a); a.click(); a.remove();
     const warn = [];
     if (!res.hrMatch) warn.push('Časy hodinek a pásu se nepodařilo sladit podle tepu (byly hodinky připojené k aplikaci?). Použil jsem čas bez korekce.');
-    else if (res.hrMatch.error > 5) warn.push('Tep v obou záznamech se dost liší – zkontrolujte, že jde o stejný běh.');
     if (!res.stats.covered) warn.push('Záznam z pásu nepokrývá celý běh z hodinek – mimo něj je rychlost 0.');
     if (ok.length > 1) warn.push('Časově odpovídalo víc záznamů z pásu, použil jsem ten s největším překryvem.');
     out(head + '<p>Záznam z pásu: ' + fmt(new Date(c.meta.startedAt)) + ' · ' + escapeHtml(c.meta.workout || '') + ' (' + c.src + ')</p>' +
