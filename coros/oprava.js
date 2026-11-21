@@ -672,25 +672,33 @@ if (typeof module !== 'undefined' && module.exports) module.exports = api; else 
     const buttonsList = root => [...(root || document).querySelectorAll('button, [role=button], a')].filter(e => !box.contains(e) && vis(e)).map(e => (e.textContent || '').trim()).filter(t => t && t.length <= 30);
     // panel stáhnout dolů, ať je stránka vidět a dá se na ni klepat
     box.style.top = '55%';
-    // použít jen pole pro výběr souboru, které se objeví až po otevření importu
-    const before = new Set(document.querySelectorAll('input[type=file]'));
-    const newInputs = () => [...document.querySelectorAll('input[type=file]')].filter(i => !box.contains(i) && !before.has(i));
+    // otevřít Import data, počkat na zobrazené tlačítko Upload a soubor vložit do pole ve stejném dialogu
     const importRe = /^(import data|import|importovat( data)?|nahrát( data)?)$/i;
-    const waitNew = async ms => { for (let t = 0; t < ms; t += 250) { const n = newInputs(); if (n.length) { await sleep(300); return newInputs(); } await sleep(250); } return []; };
-    let found = [];
+    const uploads = () => { let u = [...document.querySelectorAll('*')].filter(e => !box.contains(e) && vis(e) && /^upload$/i.test((e.textContent || '').trim())); return u.filter(e => !u.some(o => o !== e && e.contains(o))); };
+    const waitUpload = async ms => { for (let t = 0; t < ms; t += 250) { const u = uploads(); if (u.length) { await sleep(300); return uploads(); } await sleep(250); } return []; };
     let imp = byText(importRe);
     if (!imp) {
       const nav = byText(/^(activity list|activities|seznam aktivit|aktivity)$/i);
       if (nav) { nav.click(); L('   klepnuto na „' + nav.textContent.trim() + '“', MUTED); await sleep(3000); imp = byText(importRe); }
     }
-    if (imp) { imp.click(); L('   klepnuto na „' + imp.textContent.trim() + '“', MUTED); found = await waitNew(4000); }
-    if (!found.length) {
-      L('? ' + (imp ? 'Po klepnutí na Import Data se neobjevil dialog pro výběr souboru.' : 'Tlačítko Import Data jsem nenašel.') + ' Otevřete prosím dialog importu sám (Activity List → Import Data). Čekám (až 2 min)… Panel můžete zmenšit nebo přesunout.', BAD);
+    let ups = [];
+    if (imp) { imp.click(); L('   klepnuto na „' + imp.textContent.trim() + '“', MUTED); ups = await waitUpload(5000); }
+    if (!ups.length) {
+      L('? ' + (imp ? 'Po klepnutí na Import data se dialog s tlačítkem Upload neobjevil.' : 'Tlačítko Import data jsem nenašel.') + ' Otevřete prosím dialog importu sám (Activity List → Import data). Čekám (až 2 min)… Panel můžete zmenšit nebo přesunout.', BAD);
       L('   tlačítka na stránce: ' + buttonsList().slice(0, 25).join(' | '), MUTED);
-      found = await waitNew(120000);
+      ups = await waitUpload(120000);
     }
-    if (found.length !== 1) { stop(found.length ? 'V dialogu importu je víc polí pro výběr souboru, nevím, které použít. Dokončete import ručně, nebo mi pošlete výpis.' : 'Dialog importu se neotevřel.'); return; }
-    const inp = found[0];
+    if (ups.length !== 1) { stop(ups.length ? 'Na stránce je víc tlačítek „Upload“ (' + ups.length + '), nevím, které patří k importu. Dokončete import ručně.' : 'Dialog importu se neotevřel.'); return; }
+    const upBtn = ups[0];
+    // nejbližší společný předek tlačítka Upload, který obsahuje právě jedno pole pro soubor
+    let dlg = upBtn.parentElement, inp = null;
+    while (dlg && dlg !== document.documentElement) {
+      const ins = [...dlg.querySelectorAll('input[type=file]')].filter(i => !box.contains(i));
+      if (ins.length === 1) { inp = ins[0]; break; }
+      if (ins.length > 1) break;
+      dlg = dlg.parentElement;
+    }
+    if (!inp) { stop('V dialogu importu jsem nenašel jednoznačné pole pro výběr souboru. Dokončete import ručně, nebo mi pošlete výpis.'); return; }
     // vložit opravený soubor, jako by ho uživatel vybral
     try {
       const dt = new DataTransfer(); dt.items.add(new File([res.bytes], fileName, { type:'application/octet-stream', lastModified:Date.now() }));
@@ -698,13 +706,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = api; else 
       inp.dispatchEvent(new Event('input', { bubbles:true })); inp.dispatchEvent(new Event('change', { bubbles:true }));
       L('✓ Opravený soubor ' + fileName + ' vložen do importu', OK);
     } catch (e) { stop('Soubor se nepodařilo vložit do importu: ' + e.message); return; }
-    // potvrdit nahrání tlačítkem v dialogu
     await sleep(1500);
-    // prvek s textem přesně „Upload“ kdekoli na stránce (mimo panel); vnořené duplicity sloučit
-    let ups = [...document.querySelectorAll('*')].filter(e => !box.contains(e) && vis(e) && /^upload$/i.test((e.textContent || '').trim()));
-    ups = ups.filter(e => !ups.some(o => o !== e && e.contains(o)));   // jen nejvnitřnější
-    if (ups.length === 1) { ups[0].click(); L('   klepnuto na „Upload“', MUTED); }
-    else L('? ' + (ups.length ? 'Našel jsem ' + ups.length + ' tlačítka „Upload“, nevím, které je správné.' : 'Tlačítko „Upload“ jsem nenašel.') + ' Klepněte na něj prosím sám (panel můžete zmenšit nebo přesunout).', BAD);
+    if (!vis(upBtn)) { stop('Tlačítko Upload po vložení souboru zmizelo. Zkontrolujte dialog a případně dokončete ručně.'); return; }
+    upBtn.click(); L('   klepnuto na „Upload“', MUTED);
     const wait = L('… Čekám, až Coros soubor zpracuje', MUTED);
     const expStart = res.trimmed ? res.trimmed.from : act.startTime;   // začátek opraveného běhu (po zkrácení)
     let fixed = null;
