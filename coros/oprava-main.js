@@ -10,9 +10,35 @@
   const old = document.getElementById(ID); if (old) old.remove();
   const box = document.createElement('div'); box.id = ID;
   box.style.cssText = 'position:fixed;left:8px;right:8px;top:8px;bottom:8px;z-index:2147483647;background:#fff;color:#111;font:14px/1.45 system-ui,sans-serif;border:2px solid #0b6bcb;border-radius:12px;padding:12px;overflow:auto;box-shadow:0 4px 24px rgba(0,0,0,.35)';
-  box.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><b>Pás – oprava běhu</b><button id="pcX" style="font:inherit;padding:6px 12px">Zavřít</button></div><div id="pcBody" style="margin-top:8px"></div>';
+  box.innerHTML = '<div id="pcHead" style="display:flex;justify-content:space-between;align-items:center;gap:8px;touch-action:none;cursor:move;user-select:none"><b>☰ Pás – oprava běhu</b><span><button id="pcMin" style="font:inherit;padding:6px 10px;margin-right:6px">Zmenšit</button><button id="pcX" style="font:inherit;padding:6px 10px">Zavřít</button></span></div><div id="pcBody" style="margin-top:8px"></div>';
   document.body.appendChild(box);
   box.querySelector('#pcX').onclick = () => box.remove();
+  // panel jde přesunout tažením za hlavičku a zmenšit na lištu
+  const head = box.querySelector('#pcHead');
+  const pin = () => { const r = box.getBoundingClientRect(); Object.assign(box.style, { top:r.top + 'px', left:r.left + 'px', width:r.width + 'px', height:r.height + 'px', right:'auto', bottom:'auto' }); };
+  head.addEventListener('pointerdown', e => {
+    if (e.target.closest('button')) return;
+    pin(); const sx = e.clientX, sy = e.clientY, st = parseFloat(box.style.top), sl = parseFloat(box.style.left);
+    head.setPointerCapture(e.pointerId);
+    const mv = ev => {
+      box.style.top = Math.max(0, Math.min(innerHeight - 40, st + ev.clientY - sy)) + 'px';
+      box.style.left = Math.max(-box.offsetWidth + 80, Math.min(innerWidth - 80, sl + ev.clientX - sx)) + 'px';
+    };
+    const up = () => { head.removeEventListener('pointermove', mv); head.removeEventListener('pointerup', up); head.removeEventListener('pointercancel', up); };
+    head.addEventListener('pointermove', mv); head.addEventListener('pointerup', up); head.addEventListener('pointercancel', up);
+  });
+  let saved = null;
+  box.querySelector('#pcMin').onclick = () => {
+    const b = box.querySelector('#pcBody');
+    if (!saved) {
+      saved = { top:box.style.top, left:box.style.left, right:box.style.right, bottom:box.style.bottom, width:box.style.width, height:box.style.height };
+      Object.assign(box.style, { top:'auto', left:'auto', right:'8px', bottom:'8px', width:'auto', height:'auto' });
+      b.style.display = 'none'; box.querySelector('#pcMin').textContent = 'Zvětšit';
+    } else {
+      Object.assign(box.style, saved); saved = null;
+      b.style.display = ''; box.querySelector('#pcMin').textContent = 'Zmenšit';
+    }
+  };
   const body = box.querySelector('#pcBody');
   const OK = '#127a3e', BAD = '#b42318', MUTED = '#667085';
   const L = (t, c) => { const d = document.createElement('div'); d.textContent = t; if (c) d.style.color = c; d.style.whiteSpace = 'pre-wrap'; body.appendChild(d); box.scrollTop = box.scrollHeight; return d; };
@@ -259,13 +285,11 @@
     } catch (e) { stop('Soubor se nepodařilo vložit do importu: ' + e.message); return; }
     // potvrdit nahrání tlačítkem v dialogu
     await sleep(1500);
-    const dlg = inp.closest('[role=dialog], [class*=dialog], [class*=modal], [class*=popup], [class*=drawer]') || document;
-    const conf = byText(/^(upload|start upload|import|confirm|ok|submit|nahrát|importovat|potvrdit|odeslat)$/i, dlg);
-    if (conf) { conf.click(); L('   klepnuto na „' + conf.textContent.trim() + '“ v dialogu', MUTED); }
-    else {
-      L('? Potvrzovací tlačítko jsem v dialogu nenašel. Pokud dialog čeká na potvrzení, klepněte na něj prosím sám (Upload).', BAD);
-      L('   tlačítka v dialogu: ' + buttonsList(dlg === document ? null : dlg).slice(0, 15).join(' | '), MUTED);
-    }
+    // prvek s textem přesně „Upload“ kdekoli na stránce (mimo panel); vnořené duplicity sloučit
+    let ups = [...document.querySelectorAll('*')].filter(e => !box.contains(e) && vis(e) && /^upload$/i.test((e.textContent || '').trim()));
+    ups = ups.filter(e => !ups.some(o => o !== e && e.contains(o)));   // jen nejvnitřnější
+    if (ups.length === 1) { ups[0].click(); L('   klepnuto na „Upload“', MUTED); }
+    else L('? ' + (ups.length ? 'Našel jsem ' + ups.length + ' tlačítka „Upload“, nevím, které je správné.' : 'Tlačítko „Upload“ jsem nenašel.') + ' Klepněte na něj prosím sám (panel můžete zmenšit nebo přesunout).', BAD);
     const wait = L('… Čekám, až Coros soubor zpracuje', MUTED);
     let fixed = null;
     for (let i = 0; i < 36 && !fixed; i++) {
