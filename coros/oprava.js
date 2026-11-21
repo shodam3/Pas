@@ -579,6 +579,25 @@ if (typeof module !== 'undefined' && module.exports) module.exports = api; else 
     L('✓ Běh z hodinek: ' + fmt(as) + ' · ' + (act.name || '') + ' · ' + km(act.distance) + ' · ' + mins(act.totalTime || 0), OK);
     L('   hodinky: ' + fmtS(as) + ' – ' + fmtS(ae), MUTED);
 
+    // ---------- průzkum: kde Coros ukládá vybavení (boty) – jen čtení ----------
+    L('🔎 klíče v seznamu: ' + Object.keys(act).join(', '), MUTED);
+    try {
+      const det = await coros('activity/detail/query?labelId=' + encodeURIComponent(act.labelId) + '&sportType=' + act.sportType, { method:'POST' });
+      const hits = [];
+      const walk = (o, path, d) => {
+        if (d > 5 || !o || typeof o !== 'object') return;
+        for (const k of Object.keys(o)) {
+          const v = o[k], pth = path ? path + '.' + k : k;
+          if (/shoe|gear|equip|boot|sneak|wear|bot/i.test(k)) hits.push(pth + ' = ' + JSON.stringify(v).slice(0, 300));
+          if (v && typeof v === 'object' && !Array.isArray(v)) walk(v, pth, d + 1);
+          else if (Array.isArray(v) && v.length && v[0] && typeof v[0] === 'object' && v.length < 50) walk(v[0], pth + '[0]', d + 1);
+        }
+      };
+      walk(act, 'seznam', 0); walk(det, 'detail', 0);
+      L('🔎 Průzkum bot – nalezeno: ' + (hits.length ? hits.join('  |  ') : 'nic'), MUTED);
+      L('🔎 klíče v detailu: ' + Object.keys(det || {}).join(', ') + (det && det.summary ? ' · summary: ' + Object.keys(det.summary).join(', ') : ''), MUTED);
+    } catch (e) { L('🔎 Průzkum bot: ' + e.message, MUTED); }
+
     // ---------- 3) GitHub a záznam z pásu ----------
     let ghTok = ls.get('pasGhToken'), ghRepo = ls.get('pasGhRepo') || 'pas-data';
     if (!ghTok) {

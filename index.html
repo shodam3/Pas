@@ -136,12 +136,15 @@
       <div class="muted" id="lvTarget"></div>
       <div class="bar"><div id="lvBar"></div></div>
       <div class="metrics">
-        <div class="m"><b id="mSpd">–</b><span>km/h</span></div>
+        <div class="m"><b id="mPace">–</b><span>tempo /km</span></div>
         <div class="m"><b id="mInc">–</b><span>sklon %</span></div>
         <div class="m"><b id="mHr">–</b><span>tep</span></div>
-        <div class="m"><b id="mPace">–</b><span>tempo /km</span></div>
+        <div class="m"><b id="mSpd">–</b><span>km/h</span></div>
         <div class="m"><b id="mTime">0:00</b><span>čas</span></div>
         <div class="m"><b id="mDist">0,00</b><span>km</span></div>
+        <div class="m"><b id="mAvgPace">–</b><span>prům. tempo</span></div>
+        <div class="m"><b id="mAvgHr">–</b><span>prům. tep</span></div>
+        <div class="m"><b id="mAsc">0</b><span>převýšení m</span></div>
       </div>
       <div class="muted" style="margin-top:8px" id="lvNext"></div>
       <div class="row" style="margin-top:10px">
@@ -503,7 +506,7 @@ function onTmData(e) {
     let delta = r.dist - lastTmDist;
     if (delta < 0) delta = r.dist;          // pás si po zastavení vynuloval počítadlo
     lastTmDist = r.dist;
-    if (run && !run.finished && delta > 0 && delta < 300) run.dist += delta;
+    if (run && !run.finished && delta > 0 && delta < 300) { run.dist += delta; if (live.incline > 0) run.ascent = (run.ascent || 0) + delta * live.incline / 100; }
   }
   if (run && !run.finished) engine.onData();
 }
@@ -729,6 +732,7 @@ const engine = {
     if (now - run.lastSample >= 1000) {
       run.lastSample = now;
       run.samples.push([now, live.speed ?? 0, Math.round(run.dist), live.incline ?? 0, live.hr || live.tmHr || 0, run.paused ? 1 : 0, run.stepIdx]);
+      const hrNow = live.hr || live.tmHr; if (!run.paused && hrNow) { run.hrSum = (run.hrSum || 0) + hrNow; run.hrN = (run.hrN || 0) + 1; }
       if (run.samples.length % 15 === 0) store.set('pas.current', run);
     }
     // automatická pauza, když pás stojí (zastavení na konzoli, bezpečnostní klíč)
@@ -794,7 +798,14 @@ const engine = {
     setTimeout(() => { $('runIdle').hidden = false; }, 100);
   },
   banner(t) { $('runBanner').innerHTML = t ? '<div class="banner">' + escapeHtml(t) + '</div>' : ''; },
+  renderAvg() {
+    const kmh = run.active > 0 ? (run.dist / 1000) / (run.active / 3600) : 0;
+    $('mAvgPace').textContent = run.dist >= 10 ? pace(kmh) : '–';
+    $('mAvgHr').textContent = run.hrN ? Math.round(run.hrSum / run.hrN) : '–';
+    $('mAsc').textContent = Math.round(run.ascent || 0);
+  },
   render() {
+    this.renderAvg();
     if (run.free) {
       $('lvStep').textContent = 'Volný trénink'; $('lvIdx').textContent = '';
       $('lvRemain').textContent = run.waiting ? 'Čekám na rozjetí pásu…' : fmtTime(run.active);
