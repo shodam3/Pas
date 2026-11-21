@@ -196,16 +196,10 @@ function merge(watchBytes, samples, opts = {}) {
   }
   const unix = m => getField(m, 253) + FIT_EPOCH;
 
-  // 1) časový posun hodin – podle průběhu tepu (obě řady jsou z hodinek)
-  const wHr = new Map(); recs.forEach(m => { const h = getField(m, 3); if (h) wHr.set(unix(m), h); });
-  const tHr = new Map(); samples.forEach(s => { if (s[4]) tHr.set(Math.round(s[0] / 1000), s[4]); });
-  let offset = 0, bestErr = Infinity, bestN = 0;
-  for (let off = -180; off <= 180; off++) {
-    let sum = 0, n = 0;
-    for (const [t, h] of wHr) { const x = tHr.get(t + off); if (x) { sum += Math.abs(x - h); n++; } }
-    if (n >= 60 && sum / n < bestErr) { bestErr = sum / n; offset = off; bestN = n; }
-  }
-  if (!bestN) offset = 0;
+  // 1) časový posun hodin – podle průběhu tepu, nebo jak ho zvolil uživatel
+  const al = alignRecs(recs, samples);
+  const offset = opts.offset != null ? opts.offset : al.offset;
+  const bestErr = al.error, bestN = al.points;
 
   // 2) data z pásu v čase hodinek (interpolace po sekundách)
   const T = samples.map(s => s[0] / 1000 - offset);
@@ -329,6 +323,31 @@ function merge(watchBytes, samples, opts = {}) {
   };
 }
 
+// Sladění hodin hodinek a telefonu podle tepu (tep z hodinek je v obou záznamech).
+// Hledá posun v rozsahu ±range s. Nejednoznačné = stejně dobře (do +0,5 tepu) sedí posuny
+// rozprostřené přes víc než 6 s – pak má rozhodnout uživatel.
+const ALIGN_RANGE = 30, ALIGN_MIN_POINTS = 60, ALIGN_TOL = 0.5, ALIGN_SPREAD = 6;
+function alignRecs(recs, samples, range = ALIGN_RANGE) {
+  const wHr = new Map(); recs.forEach(m => { const h = getField(m, 3), t = getField(m, 253); if (h && t != null) wHr.set(t + FIT_EPOCH, h); });
+  const tHr = new Map(); samples.forEach(s => { if (s[4]) tHr.set(Math.round(s[0] / 1000), s[4]); });
+  const tried = [];
+  for (let off = -range; off <= range; off++) {
+    let sum = 0, n = 0;
+    for (const [t, h] of wHr) { const x = tHr.get(t + off); if (x) { sum += Math.abs(x - h); n++; } }
+    if (n >= ALIGN_MIN_POINTS) tried.push({ off, err:sum / n, n });
+  }
+  if (!tried.length) return { offset:0, error:null, points:0, ambiguous:false, matched:false, range };
+  let best = tried[0];
+  for (const t of tried) if (t.err < best.err || (t.err === best.err && Math.abs(t.off) < Math.abs(best.off))) best = t;
+  const good = tried.filter(t => t.err <= best.err + ALIGN_TOL).map(t => t.off);
+  const lo = Math.min(...good), hi = Math.max(...good);
+  return { offset:best.off, error:best.err, points:best.n, ambiguous:hi - lo > ALIGN_SPREAD, matched:true, from:lo, to:hi, range };
+}
+function align(watchBytes, samples) {
+  const fit = decode(watchBytes);
+  return alignRecs(fit.messages.filter(m => m.def.global === MSG.record), samples);
+}
+
 // začátek a konec běhu v souboru z hodinek (pro výběr odpovídajícího záznamu z pásu)
 function summary(watchBytes) {
   const fit = decode(watchBytes);
@@ -343,7 +362,7 @@ function summary(watchBytes) {
   };
 }
 
-const api = { decode, encode, merge, summary, getField, setField, crc16, FIT_EPOCH };
+const api = { decode, encode, merge, summary, align, getField, setField, crc16, FIT_EPOCH };
 if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.FIT = api;
 })(typeof window !== 'undefined' ? window : globalThis);
 // Pás – oprava běhu v Corosu (krok 2). Spouští se jako záložka na stránce Training Hubu.
@@ -543,7 +562,22 @@ if (typeof module !== 'undefined' && module.exports) module.exports = api; else 
     L('✓ Originál uložen na GitHub: ' + origPath, OK);
 
     // ---------- 5) oprava ----------
-    const res = FIT.merge(origBytes, rec.d.samples, { preserve:true });
+    const al = FIT.align(origBytes, rec.d.samples);
+    let chosen = al.offset;
+    if (al.ambiguous) {
+      const sg = v => (v > 0 ? '+' : '') + v + ' s';
+      L('? Sladění času hodinek a pásu podle tepu není jednoznačné: stejně dobře sedí posuny od ' + sg(al.from) + ' do ' + sg(al.to) + ' (nejlepší ' + sg(al.offset) + '). Jak pokračovat?', BAD);
+      chosen = await new Promise(res => {
+        const bs = [];
+        const add = (t, v, c) => { const b = button(t, c); bs.push(b); b.onclick = () => { bs.forEach(x => x.remove()); res(v); }; };
+        add('Použít ' + sg(al.offset), al.offset);
+        if (al.offset !== 0) add('Bez posunu (0 s)', 0, '#667085');
+        add('Zrušit', null, '#667085');
+      });
+      if (chosen === null) { stop('Oprava zrušena (originál je zálohovaný na GitHubu).'); return; }
+      L('   zvolený posun: ' + chosen + ' s', MUTED);
+    }
+    const res = FIT.merge(origBytes, rec.d.samples, { preserve:true, offset:chosen });
     L('✓ Opraveno: ' + km(res.stats.distance) + ' (hodinky ' + km(act.distance) + '), převýšení ' + Math.round(res.stats.ascent) + ' m, posun hodin ' + res.offset + ' s' + (res.hrMatch ? '' : ' – časy nesladěny podle tepu'), OK);
     if (res.hrMatch && res.hrMatch.error > 5) L('   Pozor: tep v obou záznamech se dost liší.', BAD);
 

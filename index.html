@@ -1015,8 +1015,23 @@ $('fitIn').onchange = async e => {
   }
   const c = ok[0];
   log('Pro opravu vybrán záznam ' + c.meta.id + ' (' + c.src + '), překryv ' + Math.round(c.overlap / 1000) + ' s, rozdíl tepu ' + c.hrErr.toFixed(1));
+  // sladění hodin: při nejednoznačné shodě rozhodne uživatel
+  const al = FIT.align(fitBytes, c.samples);
+  let chosen = al.offset;
+  if (al.ambiguous) {
+    chosen = await new Promise(res => {
+      const sg = v => (v > 0 ? '+' : '') + v + ' s';
+      out(head + '<p class="bad">Sladění času hodinek a pásu podle tepu není jednoznačné: stejně dobře sedí posuny od ' + sg(al.from) + ' do ' + sg(al.to) + ' (nejlepší ' + sg(al.offset) + ').</p><p>Jak pokračovat?</p><div class="row" id="alBtns"></div>');
+      const add = (t, v, cls) => { const b = document.createElement('button'); b.textContent = t; if (cls) b.className = cls; b.onclick = () => res(v); $('alBtns').appendChild(b); };
+      add('Použít ' + sg(al.offset), al.offset);
+      if (al.offset !== 0) add('Bez posunu (0 s)', 0, 'sec');
+      add('Zrušit', null, 'ghost');
+    });
+    if (chosen === null) { out(head + '<p class="muted">Oprava zrušena.</p>'); return; }
+    log('Sladění nejednoznačné (' + al.from + '…' + al.to + ' s), uživatel zvolil ' + chosen + ' s');
+  }
   try {
-    const res = FIT.merge(fitBytes, c.samples, { preserve:true });
+    const res = FIT.merge(fitBytes, c.samples, { preserve:true, offset:chosen });
     log('Oprava: posun hodin ' + res.offset + ' s, shoda tepu ' + JSON.stringify(res.hrMatch));
     const st = fitInfo.start, pad = n => String(n).padStart(2, '0');
     const name = 'pas-' + st.getFullYear() + '-' + pad(st.getMonth() + 1) + '-' + pad(st.getDate()) + '-' + pad(st.getHours()) + pad(st.getMinutes()) + '.fit';

@@ -195,7 +195,22 @@
     L('✓ Originál uložen na GitHub: ' + origPath, OK);
 
     // ---------- 5) oprava ----------
-    const res = FIT.merge(origBytes, rec.d.samples, { preserve:true });
+    const al = FIT.align(origBytes, rec.d.samples);
+    let chosen = al.offset;
+    if (al.ambiguous) {
+      const sg = v => (v > 0 ? '+' : '') + v + ' s';
+      L('? Sladění času hodinek a pásu podle tepu není jednoznačné: stejně dobře sedí posuny od ' + sg(al.from) + ' do ' + sg(al.to) + ' (nejlepší ' + sg(al.offset) + '). Jak pokračovat?', BAD);
+      chosen = await new Promise(res => {
+        const bs = [];
+        const add = (t, v, c) => { const b = button(t, c); bs.push(b); b.onclick = () => { bs.forEach(x => x.remove()); res(v); }; };
+        add('Použít ' + sg(al.offset), al.offset);
+        if (al.offset !== 0) add('Bez posunu (0 s)', 0, '#667085');
+        add('Zrušit', null, '#667085');
+      });
+      if (chosen === null) { stop('Oprava zrušena (originál je zálohovaný na GitHubu).'); return; }
+      L('   zvolený posun: ' + chosen + ' s', MUTED);
+    }
+    const res = FIT.merge(origBytes, rec.d.samples, { preserve:true, offset:chosen });
     L('✓ Opraveno: ' + km(res.stats.distance) + ' (hodinky ' + km(act.distance) + '), převýšení ' + Math.round(res.stats.ascent) + ' m, posun hodin ' + res.offset + ' s' + (res.hrMatch ? '' : ' – časy nesladěny podle tepu'), OK);
     if (res.hrMatch && res.hrMatch.error > 5) L('   Pozor: tep v obou záznamech se dost liší.', BAD);
 
