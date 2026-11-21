@@ -183,7 +183,7 @@ function merge(watchBytes, samples, opts = {}) {
   const fit = decode(watchBytes);
   const P = !!opts.preserve;   // zachovat přesně strukturu originálu (jen změnit hodnoty)
   const msgs = fit.messages;
-  const recs = msgs.filter(m => m.def.global === MSG.record);
+  let recs = msgs.filter(m => m.def.global === MSG.record);
   if (recs.length < 10) throw new Error('Soubor z hodinek neobsahuje záznam běhu');
   if (!samples || samples.length < 10) throw new Error('Záznam z pásu je prázdný');
   // pás hlásí vzdálenost jen po 10 m – vzdálenost proto počítáme z rychlosti (lichoběžníkově)
@@ -211,6 +211,29 @@ function merge(watchBytes, samples, opts = {}) {
     const a = samples[lo], b = samples[hi], k = (t - T[lo]) / ((T[hi] - T[lo]) || 1);
     return { dist:a[2] + (b[2] - a[2]) * k, speed:a[5] ? 0 : a[1] + (b[1] - a[1]) * k, inc:a[3], step:a[6], out:false };
   }
+  // 2b) zkrácení na dobu, kdy se pás pohyboval (začátek a konec v čase hodinek)
+  let trimmed = null;
+  if (opts.trim) {
+    let mv0 = null, mv1 = null;
+    for (let i = 0; i < samples.length; i++) if (samples[i][1] > 0 && !samples[i][5]) { if (mv0 == null) mv0 = T[i]; mv1 = T[i]; }
+    if (mv0 != null) {
+      const w0 = unix(recs[0]), w1 = unix(recs[recs.length - 1]);
+      const tA = Math.max(w0, Math.floor(mv0)), tB = Math.min(w1, Math.ceil(mv1));
+      const keep = recs.filter(m => { const t = unix(m); return t >= tA && t <= tB; });
+      if (keep.length >= 10 && (tA > w0 || tB < w1)) {
+        const drop = new Set(recs.filter(m => !keep.includes(m)));
+        const kept = msgs.filter(m => !drop.has(m)); msgs.length = 0; kept.forEach(m => msgs.push(m)); fit.messages = msgs;
+        recs = keep;
+        const nA = unix(recs[0]), nB = unix(recs[recs.length - 1]);
+        // značky start/stop časovače
+        const tev = msgs.filter(m => m.def.global === MSG.event && getField(m, 0) === 0);
+        const st0 = tev.find(m => getField(m, 1) === 0); if (st0 && unix(st0) < nA) setField(st0, 253, nA - FIT_EPOCH);
+        const stp = [...tev].reverse().find(m => getField(m, 1) === 4 || getField(m, 1) === 1); if (stp && unix(stp) > nB) setField(stp, 253, nB - FIT_EPOCH);
+        trimmed = { from:nA, to:nB, cutStart:nA - w0, cutEnd:w1 - nB, w0, w1 };
+      }
+    }
+  }
+
   const t0 = unix(recs[0]);
   const base = at(t0).dist;
 
@@ -243,6 +266,18 @@ function merge(watchBytes, samples, opts = {}) {
   const pauses = []; let stopAt = null;
   evs.forEach(e => { if (e.type === 1 || e.type === 4) stopAt = e.t; else if (e.type === 0 && stopAt != null) { pauses.push([stopAt, e.t]); stopAt = null; } });
   const pausedIn = (a, b) => pauses.reduce((s, [x, y]) => s + Math.max(0, Math.min(b, y) - Math.max(a, x)), 0);
+
+  if (trimmed) {
+    const el = trimmed.to - trimmed.from, tm = Math.max(0, el - pausedIn(trimmed.from, trimmed.to));
+    msgs.filter(m => m.def.global === MSG.session).forEach(S => { setField(S, 2, trimmed.from - FIT_EPOCH); setField(S, 253, trimmed.to - FIT_EPOCH); setField(S, 7, el * 1000); setField(S, 8, tm * 1000); });
+    msgs.filter(m => m.def.global === MSG.activity).forEach(A => {
+      const ts = getField(A, 253), lt = getField(A, 5);
+      // Coros zapisuje čas aktivity jako začátek běhu; zachovat stejnou konvenci (začátek ↔ začátek, konec ↔ konec)
+      const nt = ts != null && Math.abs(ts + FIT_EPOCH - trimmed.w1) < Math.abs(ts + FIT_EPOCH - trimmed.w0) ? trimmed.to : trimmed.from;
+      if (ts != null) { setField(A, 253, nt - FIT_EPOCH); if (lt != null) setField(A, 5, lt + (nt - FIT_EPOCH - ts)); }
+      setField(A, 0, tm * 1000);
+    });
+  }
 
   // 4) okruhy: podle úseků tréninku (nebo po 1 km, když úseky chybí)
   const oldLaps = msgs.filter(m => m.def.global === MSG.lap);
@@ -303,6 +338,12 @@ function merge(watchBytes, samples, opts = {}) {
     setField(S, 22, ascent); setField(S, 23, 0);
     if (!P) { ensureField(S, 52, 2, 0x83); ensureField(S, 55, 2, 0x83); }
     setField(S, 52, avgGrade(pts) * 100); setField(S, 55, Math.max(0, ...pts.map(p => p.inc)) * 100);
+    if (trimmed) {
+      const hrs = pts.map(p => p.hr).filter(Boolean), cads = pts.map(p => p.cad).filter(Boolean);
+      if (hrs.length) { setField(S, 16, hrs.reduce((a, x) => a + x, 0) / hrs.length); setField(S, 17, Math.max(...hrs)); setField(S, 64, Math.min(...hrs)); }
+      if (cads.length) { setField(S, 18, cads.reduce((a, x) => a + x, 0) / cads.length); setField(S, 19, Math.max(...cads)); }
+      if (getField(S, 10) != null) setField(S, 10, pts.reduce((a, p) => a + (p.cad || 0) / 60 * p.dt, 0));
+    }
     const cyc = getField(S, 10); if (cyc) setField(S, 134, totalD / cyc / 2 * 10000);   // mm × 10
   });
 
@@ -318,6 +359,7 @@ function merge(watchBytes, samples, opts = {}) {
   const bytes = encode(fit, { preserve:P });
   return {
     bytes, offset, hrMatch:bestN ? { error:bestErr, points:bestN } : null,
+    trimmed,
     stats:{ distance:totalD, ascent, laps:newLaps.length, start:new Date(t0 * 1000), end:new Date(tEnd * 1000),
             covered:samples[0][0] / 1000 - offset <= t0 + 120 && samples[samples.length - 1][0] / 1000 - offset >= tEnd - 120 }
   };

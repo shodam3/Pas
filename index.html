@@ -1042,7 +1042,7 @@ $('fitIn').onchange = async e => {
     log('Vyšší odchylka tepu ' + errC.toFixed(1) + ', uživatel pokračoval');
   }
   try {
-    const res = FIT.merge(fitBytes, c.samples, { preserve:true, offset:chosen });
+    const res = FIT.merge(fitBytes, c.samples, { preserve:true, offset:chosen, trim:true });
     log('Oprava: posun hodin ' + res.offset + ' s, shoda tepu ' + JSON.stringify(res.hrMatch));
     const st = fitInfo.start, pad = n => String(n).padStart(2, '0');
     const name = 'pas-' + st.getFullYear() + '-' + pad(st.getMonth() + 1) + '-' + pad(st.getDate()) + '-' + pad(st.getHours()) + pad(st.getMinutes()) + '.fit';
@@ -1055,6 +1055,7 @@ $('fitIn').onchange = async e => {
     if (ok.length > 1) warn.push('Časově odpovídalo víc záznamů z pásu, použil jsem ten s největším překryvem.');
     out(head + '<p>Záznam z pásu: ' + fmt(new Date(c.meta.startedAt)) + ' · ' + escapeHtml(c.meta.workout || '') + ' (' + c.src + ')</p>' +
       '<p class="ok">Hotovo, soubor <b>' + name + '</b> je ve stažených souborech.</p>' +
+      (res.trimmed ? '<p>Zkráceno na dobu, kdy jel pás: o ' + res.trimmed.cutStart + ' s na začátku a ' + res.trimmed.cutEnd + ' s na konci.</p>' : '') +
       '<p>Vzdálenost ' + fmtKm(res.stats.distance) + ' km · převýšení ' + Math.round(res.stats.ascent) + ' m · ' + res.stats.laps + ' okruhů · posun hodin ' + res.offset + ' s</p>' +
       warn.map(w => '<p class="bad">' + escapeHtml(w) + '</p>').join('') +
       '<p class="muted">Dál: na <a href="https://t.coros.com" target="_blank" rel="noopener">t.coros.com</a> → Activity List → Import Data nahrajte tento soubor a v aplikaci COROS smažte původní běh.</p>');

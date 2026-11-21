@@ -246,7 +246,8 @@
       if (!go) { stop('Oprava zrušena (originál je zálohovaný na GitHubu).'); return; }
       L('   pokračuji i přes vyšší odchylku tepu', MUTED);
     }
-    const res = FIT.merge(origBytes, rec.d.samples, { preserve:true, offset:chosen });
+    const res = FIT.merge(origBytes, rec.d.samples, { preserve:true, offset:chosen, trim:true });
+    if (res.trimmed) L('✓ Zkráceno na dobu, kdy jel pás: o ' + res.trimmed.cutStart + ' s na začátku a ' + res.trimmed.cutEnd + ' s na konci', OK);
     L('✓ Opraveno: ' + km(res.stats.distance) + ' (hodinky ' + km(act.distance) + '), převýšení ' + Math.round(res.stats.ascent) + ' m, posun hodin ' + res.offset + ' s' + (res.hrMatch ? '' : ' – časy nesladěny podle tepu'), OK);
 
     // ---------- 6) nahrání přes dialog Import Data samotného webu Corosu ----------
@@ -291,11 +292,12 @@
     if (ups.length === 1) { ups[0].click(); L('   klepnuto na „Upload“', MUTED); }
     else L('? ' + (ups.length ? 'Našel jsem ' + ups.length + ' tlačítka „Upload“, nevím, které je správné.' : 'Tlačítko „Upload“ jsem nenašel.') + ' Klepněte na něj prosím sám (panel můžete zmenšit nebo přesunout).', BAD);
     const wait = L('… Čekám, až Coros soubor zpracuje', MUTED);
+    const expStart = res.trimmed ? res.trimmed.from : act.startTime;   // začátek opraveného běhu (po zkrácení)
     let fixed = null;
     for (let i = 0; i < 36 && !fixed; i++) {
       await sleep(5000);
       wait.textContent = '… Čekám na zpracování v Corosu (' + (i + 1) * 5 + ' s)';
-      fixed = (await listActs()).find(a => a.labelId !== act.labelId && Math.abs(a.startTime - act.startTime) <= 60);
+      fixed = (await listActs()).find(a => a.labelId !== act.labelId && Math.abs(a.startTime - expStart) <= 60);
     }
     if (!fixed) { stop('Coros nový běh do 3 minut nevytvořil. Zkontrolujte na webu import (Activity List → Import Data). Originál je zálohovaný na GitHubu.'); return; }
     L('✓ Nový běh v Corosu: ' + fmt(fixed.startTime * 1000) + ' · ' + km(fixed.distance), OK);
