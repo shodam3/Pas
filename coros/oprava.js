@@ -672,23 +672,25 @@ if (typeof module !== 'undefined' && module.exports) module.exports = api; else 
     const buttonsList = root => [...(root || document).querySelectorAll('button, [role=button], a')].filter(e => !box.contains(e) && vis(e)).map(e => (e.textContent || '').trim()).filter(t => t && t.length <= 30);
     // panel stáhnout dolů, ať je stránka vidět a dá se na ni klepat
     box.style.top = '55%';
-    let inp = fileInput();
-    if (!inp) {
-      const imp = byText(/^(import data|import|importovat( data)?|nahrát( data)?)$/i);
-      if (imp) { imp.click(); L('   klepnuto na „' + imp.textContent.trim() + '“', MUTED); await sleep(2000); inp = fileInput(); }
-    }
-    if (!inp) {
+    // použít jen pole pro výběr souboru, které se objeví až po otevření importu
+    const before = new Set(document.querySelectorAll('input[type=file]'));
+    const newInputs = () => [...document.querySelectorAll('input[type=file]')].filter(i => !box.contains(i) && !before.has(i));
+    const importRe = /^(import data|import|importovat( data)?|nahrát( data)?)$/i;
+    const waitNew = async ms => { for (let t = 0; t < ms; t += 250) { const n = newInputs(); if (n.length) { await sleep(300); return newInputs(); } await sleep(250); } return []; };
+    let found = [];
+    let imp = byText(importRe);
+    if (!imp) {
       const nav = byText(/^(activity list|activities|seznam aktivit|aktivity)$/i);
-      if (nav) { nav.click(); L('   klepnuto na „' + nav.textContent.trim() + '“', MUTED); await sleep(3000);
-        const imp = byText(/^(import data|import|importovat( data)?|nahrát( data)?)$/i);
-        if (imp) { imp.click(); L('   klepnuto na „' + imp.textContent.trim() + '“', MUTED); await sleep(2000); inp = fileInput(); } }
+      if (nav) { nav.click(); L('   klepnuto na „' + nav.textContent.trim() + '“', MUTED); await sleep(3000); imp = byText(importRe); }
     }
-    if (!inp) {
-      L('? Dialog importu jsem nenašel sám. Otevřete ho prosím na stránce: Activity List → Import Data. Čekám (až 2 min)…', BAD);
+    if (imp) { imp.click(); L('   klepnuto na „' + imp.textContent.trim() + '“', MUTED); found = await waitNew(4000); }
+    if (!found.length) {
+      L('? ' + (imp ? 'Po klepnutí na Import Data se neobjevil dialog pro výběr souboru.' : 'Tlačítko Import Data jsem nenašel.') + ' Otevřete prosím dialog importu sám (Activity List → Import Data). Čekám (až 2 min)… Panel můžete zmenšit nebo přesunout.', BAD);
       L('   tlačítka na stránce: ' + buttonsList().slice(0, 25).join(' | '), MUTED);
-      for (let i = 0; i < 120 && !inp; i++) { await sleep(1000); inp = fileInput(); }
-      if (!inp) { stop('Dialog importu se neotevřel. Originál je zálohovaný na GitHubu.'); return; }
+      found = await waitNew(120000);
     }
+    if (found.length !== 1) { stop(found.length ? 'V dialogu importu je víc polí pro výběr souboru, nevím, které použít. Dokončete import ručně, nebo mi pošlete výpis.' : 'Dialog importu se neotevřel.'); return; }
+    const inp = found[0];
     // vložit opravený soubor, jako by ho uživatel vybral
     try {
       const dt = new DataTransfer(); dt.items.add(new File([res.bytes], fileName, { type:'application/octet-stream', lastModified:Date.now() }));
