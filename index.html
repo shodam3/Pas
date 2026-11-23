@@ -162,7 +162,7 @@
       <div id="doneSum"></div>
       <div class="muted" style="margin-top:8px">Na hodinkách běh ukončete a uložte. Až se běh synchronizuje do Corosu, opravte ho:</div>
       <a class="corosLink" href="https://t.coros.com/"><button class="big" style="margin-top:8px">Opravit v Corosu</button></a>
-      <div class="muted" style="margin-top:4px">Otevře se Training Hub v Chromu. Tam do adresního řádku napište <b>pas oprava</b> a vyberte záložku.</div>
+      <div class="muted" style="margin-top:4px">V nabídce Sdílet vyberte <b>Chrome</b>. Pak do adresního řádku napište název své záložky pro opravu a vyberte ji.</div>
     </div>
   </section>
 
@@ -170,17 +170,9 @@
   <section id="tab-runs" hidden>
     <div class="card">
       <h2>Oprava v Corosu</h2>
-      <div style="border:2px dashed var(--line);border-radius:10px;padding:8px;margin-bottom:10px">
-        <b>Dočasná zkouška:</b> klepněte postupně na každé tlačítko a zapamatujte si, které otevře Coros v Chromu <b>s adresním řádkem</b>. Po každém pokusu se vraťte do aplikace.
-        <div class="row">
-          <a href="intent://t.coros.com/#Intent;scheme=https;package=com.android.chrome;launchFlags=0x10000000;end"><button class="sec">Zkouška 1</button></a>
-          <a href="googlechrome://navigate?url=https://t.coros.com/"><button class="sec">Zkouška 2</button></a>
-          <a href="intent://t.coros.com/#Intent;scheme=https;action=android.intent.action.VIEW;component=com.android.chrome/com.google.android.apps.chrome.Main;launchFlags=0x10000000;end"><button class="sec">Zkouška 3</button></a>
-          <button class="sec" id="tstShare">Zkouška 4 (Sdílet)</button>
-        </div>
       </div>
       <a class="corosLink" href="https://t.coros.com/"><button class="big">Opravit v Corosu</button></a>
-      <div class="muted" style="margin-top:4px">Otevře se Training Hub v Chromu. Tam do adresního řádku napište <b>pas oprava</b> a vyberte záložku.</div>
+      <div class="muted" style="margin-top:4px">V nabídce Sdílet vyberte <b>Chrome</b>. Pak do adresního řádku napište název své záložky pro opravu a vyberte ji.</div>
     </div>
     <div class="card">
       <h2>Oprava záznamu z hodinek (ručně)</h2>
@@ -1100,18 +1092,17 @@ $('btnCopy').onclick = async () => {
   try { await navigator.clipboard.writeText(logLines.join('\n')); toast('Zkopírováno'); } catch (e) { toast('Kopírování se nepovedlo'); }
 };
 
-// ---------- odkazy na Training Hub ----------
-// Na Androidu otevřít přímo v Chromu (nainstalovaná aplikace by jinak otevřela okno bez adresního řádku, kde záložku nespustíte)
+// ---------- otevření Training Hubu ----------
+// Z nainstalované aplikace Android otevírá odkazy v okně bez adresního řádku, kde záložku nelze spustit.
+// Proto se adresa sdílí – v nabídce Sdílet se vybere Chrome a ten ji otevře normálně s adresním řádkem.
 document.querySelectorAll('a.corosLink').forEach(a => {
-  if (/Android/i.test(navigator.userAgent)) a.href = 'intent://t.coros.com/#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=' + encodeURIComponent('https://t.coros.com/') + ';end';
-  else { a.target = '_blank'; a.rel = 'noopener'; }
+  a.addEventListener('click', async e => {
+    if (!navigator.share) return;   // bez sdílení obyčejný odkaz
+    e.preventDefault();
+    try { await navigator.share({ url:'https://t.coros.com/' }); }
+    catch (err) { if (err.name !== 'AbortError') location.href = 'https://t.coros.com/'; }
+  });
 });
-
-$('tstShare').onclick = async () => {
-  if (!navigator.share) { toast('Sdílení tady není dostupné'); return; }
-  try { await navigator.share({ url:'https://t.coros.com/' }); }
-  catch (e) { if (e.name !== 'AbortError') toast('Sdílení selhalo: ' + e.message); }
-};
 
 // ---------- offline režim a instalace ----------
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
