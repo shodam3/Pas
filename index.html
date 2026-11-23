@@ -176,6 +176,7 @@
           <a href="intent://t.coros.com/#Intent;scheme=https;package=com.android.chrome;launchFlags=0x10000000;end"><button class="sec">Zkouška 1</button></a>
           <a href="googlechrome://navigate?url=https://t.coros.com/"><button class="sec">Zkouška 2</button></a>
           <a href="intent://t.coros.com/#Intent;scheme=https;action=android.intent.action.VIEW;component=com.android.chrome/com.google.android.apps.chrome.Main;launchFlags=0x10000000;end"><button class="sec">Zkouška 3</button></a>
+          <button class="sec" id="tstShare">Zkouška 4 (Sdílet)</button>
         </div>
       </div>
       <a class="corosLink" href="https://t.coros.com/"><button class="big">Opravit v Corosu</button></a>
@@ -1105,6 +1106,12 @@ document.querySelectorAll('a.corosLink').forEach(a => {
   if (/Android/i.test(navigator.userAgent)) a.href = 'intent://t.coros.com/#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=' + encodeURIComponent('https://t.coros.com/') + ';end';
   else { a.target = '_blank'; a.rel = 'noopener'; }
 });
+
+$('tstShare').onclick = async () => {
+  if (!navigator.share) { toast('Sdílení tady není dostupné'); return; }
+  try { await navigator.share({ url:'https://t.coros.com/' }); }
+  catch (e) { if (e.name !== 'AbortError') toast('Sdílení selhalo: ' + e.message); }
+};
 
 // ---------- offline režim a instalace ----------
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
