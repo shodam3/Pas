@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pás</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0b6bcb">
+<link rel="icon" href="ikony/ikona-192.png">
+<link rel="apple-touch-icon" href="ikony/ikona-180.png">
 <style>
   :root { --bg:#f4f5f7; --fg:#1d2330; --muted:#667085; --card:#fff; --line:#e3e6eb; --acc:#0b6bcb; --ok:#127a3e; --bad:#b42318;
           --c-warmup:#e8890c; --c-run:#0b6bcb; --c-rest:#1f9d55; --c-cooldown:#7a4fd1; }
@@ -156,14 +160,21 @@
     <div class="card" id="runDone" hidden>
       <h2>Trénink dokončen</h2>
       <div id="doneSum"></div>
-      <div class="muted" style="margin-top:8px">Záznam je uložený v záložce Záznamy. Na hodinkách běh ukončete a uložte.</div>
+      <div class="muted" style="margin-top:8px">Na hodinkách běh ukončete a uložte. Až se běh synchronizuje do Corosu, opravte ho:</div>
+      <a class="corosLink" href="https://t.coros.com/"><button class="big" style="margin-top:8px">Opravit v Corosu</button></a>
+      <div class="muted" style="margin-top:4px">Otevře se Training Hub v Chromu. Tam do adresního řádku napište <b>pas oprava</b> a vyberte záložku.</div>
     </div>
   </section>
 
   <!-- ================= ZÁZNAMY ================= -->
   <section id="tab-runs" hidden>
     <div class="card">
-      <h2>Oprava záznamu z hodinek</h2>
+      <h2>Oprava v Corosu</h2>
+      <a class="corosLink" href="https://t.coros.com/"><button class="big">Opravit v Corosu</button></a>
+      <div class="muted" style="margin-top:4px">Otevře se Training Hub v Chromu. Tam do adresního řádku napište <b>pas oprava</b> a vyberte záložku.</div>
+    </div>
+    <div class="card">
+      <h2>Oprava záznamu z hodinek (ručně)</h2>
       <div class="muted">V aplikaci COROS otevřete běh → export ve formátu FIT → uložit do telefonu. Pak ho tady vyberte. Aplikace sama najde odpovídající záznam z pásu.</div>
       <div class="row"><button id="btnPickFit">Vybrat soubor FIT</button><input type="file" id="fitIn" accept=".fit,application/octet-stream,*/*" hidden></div>
       <div id="fixOut"></div>
@@ -1079,6 +1090,18 @@ $('fitIn').onchange = async e => {
 $('btnCopy').onclick = async () => {
   try { await navigator.clipboard.writeText(logLines.join('\n')); toast('Zkopírováno'); } catch (e) { toast('Kopírování se nepovedlo'); }
 };
+
+// ---------- odkazy na Training Hub ----------
+// Na Androidu otevřít přímo v Chromu (nainstalovaná aplikace by jinak otevřela okno bez adresního řádku, kde záložku nespustíte)
+document.querySelectorAll('a.corosLink').forEach(a => {
+  if (/Android/i.test(navigator.userAgent)) a.href = 'intent://t.coros.com/#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=' + encodeURIComponent('https://t.coros.com/') + ';end';
+  else { a.target = '_blank'; a.rel = 'noopener'; }
+});
+
+// ---------- offline režim a instalace ----------
+if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  navigator.serviceWorker.register('sw.js').catch(e => log('Offline režim: ' + e.message));
+}
 
 // ---------------- start ----------------
 limits = Object.assign(limits, store.get('pas.limits', {}));
