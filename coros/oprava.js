@@ -366,11 +366,11 @@ function merge(watchBytes, samples, opts = {}) {
 }
 
 // Sladění hodin hodinek a telefonu podle tepu (tep z hodinek je v obou záznamech).
-// Hledá posun v rozsahu ±range s. Nejednoznačné = stejně dobře (do +0,5 tepu) sedí posuny
-// rozprostřené přes víc než 6 s – pak má rozhodnout uživatel.
+// Hledá posun v rozsahu ±range s. Nejednoznačné = existuje jiný posun vzdálený aspoň ALIGN_FAR s
+// od nejlepšího, který sedí téměř stejně dobře (nejvýš o ALIGN_TOL tepu hůř) – pak rozhodne uživatel.
 // HR_WARN: průměrná odchylka tepu (tepy/min), od které se aplikace ptá, zda pokračovat.
 const HR_WARN = 1;
-const ALIGN_RANGE = 30, ALIGN_MIN_POINTS = 60, ALIGN_TOL = 0.5, ALIGN_SPREAD = 6;
+const ALIGN_RANGE = 30, ALIGN_MIN_POINTS = 60, ALIGN_TOL = 0.1, ALIGN_FAR = 5;
 function alignRecs(recs, samples, range = ALIGN_RANGE) {
   const wHr = new Map(); recs.forEach(m => { const h = getField(m, 3), t = getField(m, 253); if (h && t != null) wHr.set(t + FIT_EPOCH, h); });
   const tHr = new Map(); samples.forEach(s => { if (s[4]) tHr.set(Math.round(s[0] / 1000), s[4]); });
@@ -385,7 +385,8 @@ function alignRecs(recs, samples, range = ALIGN_RANGE) {
   for (const t of tried) if (t.err < best.err || (t.err === best.err && Math.abs(t.off) < Math.abs(best.off))) best = t;
   const good = tried.filter(t => t.err <= best.err + ALIGN_TOL).map(t => t.off);
   const lo = Math.min(...good), hi = Math.max(...good);
-  return { offset:best.off, error:best.err, points:best.n, ambiguous:hi - lo > ALIGN_SPREAD, matched:true, from:lo, to:hi, range,
+  const ambiguous = good.some(o => Math.abs(o - best.off) >= ALIGN_FAR);
+  return { offset:best.off, error:best.err, points:best.n, ambiguous, matched:true, from:lo, to:hi, range,
            errorAt:off => { const t = tried.find(x => x.off === off); return t ? t.err : null; } };
 }
 function align(watchBytes, samples) {
