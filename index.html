@@ -185,7 +185,7 @@
       <div class="muted">Záznamy z pásu a tréninky se ukládají do vašeho soukromého repozitáře. Klíč zůstává jen v tomto telefonu.</div>
       <div class="row"><input id="ghRepo" class="grow" placeholder="repozitář, např. pas-data"></div>
       <div class="row"><input id="ghToken" class="grow" type="password" placeholder="přístupový klíč (github_pat_…)" autocomplete="off"></div>
-      <div class="row"><button id="ghSave">Uložit a ověřit</button><button class="ghost" id="ghSync">Odeslat neodeslané</button><button class="ghost" id="ghRestore">Načíst tréninky z GitHubu</button></div>
+      <div class="row"><button id="ghSave">Uložit a ověřit</button><button class="ghost" id="ghSync">Odeslat neodeslané</button><button class="ghost" id="ghRestore">Načíst tréninky z GitHubu</button><button class="ghost" id="ghCopy">Zkopírovat klíč</button></div>
       <div id="ghStatus" class="muted"></div>
     </div>
     <div class="card">
@@ -982,6 +982,11 @@ $('ghSave').onclick = async () => {
   gh.status('Ověřuji…');
   try { const name = await gh.verify(); $('ghToken').value = '••••••••'; gh.status('Připojeno k ' + name + '. Odesílám záznamy…', 'ok'); await gh.backupWorkouts(); await gh.syncRuns(); renderRuns(); }
   catch (e) { gh.status(e.message, 'bad'); }
+};
+$('ghCopy').onclick = async () => {
+  const t = gh.cfg().token; if (!t) { gh.status('Klíč zatím není uložený.', 'bad'); return; }
+  try { await navigator.clipboard.writeText(t); toast('Klíč zkopírován'); }
+  catch (e) { gh.status('Kopírování se nepovedlo: ' + e.message, 'bad'); }
 };
 $('ghSync').onclick = () => { if (!gh.ready()) { gh.status('Nejdřív nastavte repozitář a klíč.', 'bad'); return; } gh.status('Odesílám…'); gh.syncRuns().then(() => { if (!runsIndex().length) gh.status('Vše je odesláno.', 'ok'); }); };
 armDouble($('ghRestore'), 'Opravdu přepsat tréninky?', async () => {
