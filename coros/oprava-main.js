@@ -313,13 +313,55 @@
       inp.dispatchEvent(new Event('input', { bubbles:true })); inp.dispatchEvent(new Event('change', { bubbles:true }));
       L('✓ Opravený soubor ' + fileName + ' vložen do importu', OK);
     } catch (e) { stop('Soubor se nepodařilo vložit do importu: ' + e.message); return; }
-    // po vložení může web dialog překreslit – tlačítko Upload hledat znovu
-    let ups2 = [];
-    for (let t = 0; t < 5000; t += 250) { await sleep(250); ups2 = uploads(); if (ups2.length) { await sleep(300); ups2 = uploads(); break; } }
-    if (ups2.length === 1) { ups2[0].click(); L('   klepnuto na „Upload“', MUTED); }
-    else if (!ups2.length) L('   Tlačítko Upload po vložení souboru není vidět – možná nahrávání začalo samo. Pokud dialog čeká na potvrzení, klepněte na Upload sám.', MUTED);
-    else L('? Po vložení souboru vidím ' + ups2.length + ' tlačítka „Upload“, nevím, které je správné. Klepněte prosím na to v dialogu importu sám (panel můžete zmenšit nebo přesunout).', BAD);
-    const wait = L('… Čekám, až Coros soubor zpracuje', MUTED);
+    // po vložení může web dialog překreslit a tlačítko Upload být chvíli neaktivní
+    const isDisabled = el => {
+      for (let e = el; e && e !== document.body; e = e.parentElement) {
+        const cls = typeof e.className === 'string' ? e.className : '';
+        if (e.disabled || (e.getAttribute && e.getAttribute('aria-disabled') === 'true') || /(^|[\s_-])(is-)?disabled(\b|$)/i.test(cls)) return true;
+        if (e.tagName === 'BUTTON' || (e.getAttribute && e.getAttribute('role') === 'button')) break;
+      }
+      return false;
+    };
+    const target = el => el.closest('button, [role=button], a') || el;
+    const tap = el => {
+      const r = el.getBoundingClientRect();
+      const o = { bubbles:true, cancelable:true, view:window, clientX:r.left + r.width / 2, clientY:r.top + r.height / 2, pointerType:'touch', isPrimary:true };
+      try { el.dispatchEvent(new PointerEvent('pointerdown', o)); } catch (e) {}
+      el.dispatchEvent(new MouseEvent('mousedown', o));
+      try { el.dispatchEvent(new PointerEvent('pointerup', o)); } catch (e) {}
+      el.dispatchEvent(new MouseEvent('mouseup', o));
+      el.click();
+    };
+    const findReadyUpload = async ms => {   // jediné viditelné a aktivní tlačítko Upload
+      let last = { state:'none', count:0 };
+      for (let t = 0; t < ms; t += 250) {
+        const u = uploads();
+        if (u.length > 1) last = { state:'many', count:u.length };
+        else if (u.length === 1) { const b = target(u[0]); if (!isDisabled(b)) { await sleep(200); return { state:'ok', el:b }; } last = { state:'disabled', count:1 }; }
+        await sleep(250);
+      }
+      return last;
+    };
+    const dlgText = () => (dlg && document.contains(dlg) ? dlg.textContent || '' : '');
+    let clicked = false;
+    // jen jeden pokus: druhé klepnutí by při nahrávání bez viditelné odezvy mohlo běh nahrát dvakrát
+    for (let attempt = 1; attempt <= 1 && !clicked; attempt++) {
+      const r = await findReadyUpload(15000);
+      if (r.state !== 'ok') {
+        if (r.state === 'many') L('? Vidím ' + r.count + ' tlačítka „Upload“, nevím, které je správné.', BAD);
+        else if (r.state === 'disabled') L('? Tlačítko „Upload“ zůstalo 15 s neaktivní.', BAD);
+        else L('   Tlačítko „Upload“ po vložení souboru není vidět – možná nahrávání začalo samo.', MUTED);
+        break;
+      }
+      const before = dlgText();
+      tap(r.el);
+      for (let t = 0; t < 3000; t += 250) {
+        await sleep(250);
+        if (!document.contains(r.el) || !vis(r.el) || isDisabled(r.el) || dlgText() !== before) { clicked = true; break; }
+      }
+      if (clicked) L('✓ Klepnuto na „Upload“, dialog zareagoval', OK);
+    }
+    if (!clicked) L('? Klepl jsem na „Upload“, ale dialog nijak nezareagoval. Pokud nahrávání nezačalo, klepněte na Upload prosím sám (panel můžete zmenšit nebo přesunout). Čekám na nový běh…', BAD);
     const expStart = res.trimmed ? res.trimmed.from : act.startTime;   // začátek opraveného běhu (po zkrácení)
     let fixed = null;
     for (let i = 0; i < 36 && !fixed; i++) {
